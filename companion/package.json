@@ -1,0 +1,15 @@
+{
+  "name": "claudeboard-companion",
+  "version": "0.1.0",
+  "description": "Reads Claude Code usage on this PC and pushes it to the claudeBoard meter over USB serial",
+  "type": "module",
+  "bin": { "claudeboard": "companion.js" },
+  "scripts": {
+    "start": "node companion.js",
+    "dry": "node companion.js --dry-run --once"
+  },
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "serialport": "^12.0.0"
+  }
+}

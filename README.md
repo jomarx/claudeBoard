@@ -17,6 +17,37 @@ pio run -e e32n28t -t upload     # no-touch version, BOOT button only
 On Windows, if the library install fails with "filename too long", build with a
 short workspace path, for example: `set PLATFORMIO_WORKSPACE_DIR=C:\pio-cm`.
 
+## PC companion (real data)
+
+`companion/` reads Claude Code's own logs on this PC (`~/.claude/projects/**/*.jsonl`)
+and sends a frame to the board every 20 seconds. It needs Node 18 or newer.
+
+```
+cd companion
+npm install
+node companion.js                  # finds the board (CH340) by itself
+node companion.js --port COM8      # or name the port
+node companion.js --dry-run --once # print one frame, no board needed
+```
+
+What comes from the logs: today's tokens, the estimated API-equivalent cost, the number of
+sessions, the cache hit rate, tokens per hour and the share per model. The 5-hour reset time
+is estimated (a window starts at the hour of your first message and lasts five hours).
+
+The percentage of your plan limit is not in the logs. Two ways to get it on the gauge:
+
+- `--limits` asks Claude's servers for your real 5-hour, weekly and Opus usage, the same numbers
+  Claude Code's `/usage` screen shows. It uses the sign-in Claude Code already keeps in
+  `~/.claude/.credentials.json`, and only talks to `api.anthropic.com`. The endpoint is not a
+  public API, so it may change or stop working; the meter falls back to the log numbers if it does.
+- `--session-budget 30000000` treats that many tokens (cache reads not counted) as 100% of a
+  5-hour window. This is a rough guess you tune yourself.
+
+Other options: `--interval N`, `--plan "Max 5x"`, `--brightness 0-255`, `--verbose`. The script
+reconnects by itself when the board is unplugged or reset.
+
+Nothing on the board holds any Claude credentials; it only ever sees the numbers.
+
 ## Test without the real host companion
 
 ```

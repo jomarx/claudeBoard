@@ -97,8 +97,14 @@ InputEvent inputPoll() {
   InputEvent ev;
   uint32_t now = millis();
 
-  // BOOT button
+  // BOOT button. Opening the serial port pulses GPIO0 through the auto-reset
+  // circuit, so ignore it until it has been seen released after boot.
+  static bool bArmed = false;
   bool pressed = digitalRead(BOOT_PIN) == LOW;
+  if (!bArmed) {
+    if (!pressed && now > 1500) bArmed = true;
+    pressed = false;
+  }
   if (pressed && !bDown) {
     bDown = true; bLongSent = false; bStart = now;
   } else if (pressed && bDown && !bLongSent && now - bStart > LONG_MS) {
