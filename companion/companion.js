@@ -202,15 +202,24 @@ function summarize() {
 let limits = null, limitsAt = 0, limitsErr = '', planFromLogin = null;
 
 function readLogin() {
+  // Returns the access token, or a string starting with '!' that says why there is none.
+  // Never prints the token itself.
+  let j;
   try {
-    const c = JSON.parse(fs.readFileSync(path.join(CLAUDE_DIR, '.credentials.json'), 'utf8')).claudeAiOauth;
-    const tier = `${c.rateLimitTier || ''} ${c.subscriptionType || ''}`.toLowerCase();
-    planFromLogin = /20x/.test(tier) ? 'Max 20x' : /5x/.test(tier) ? 'Max 5x' : /max/.test(tier) ? 'Max'
-      : /team/.test(tier) ? 'Team' : /enterprise/.test(tier) ? 'Enterprise' : /pro/.test(tier) ? 'Pro' : null;
-    return c.accessToken;
-  } catch {
-    return null;
+    j = JSON.parse(fs.readFileSync(path.join(CLAUDE_DIR, '.credentials.json'), 'utf8'));
+  } catch (e) {
+    return `!can't read ${path.join(CLAUDE_DIR, '.credentials.json')} (${e.code || e.message})`;
   }
+  const c = j && j.claudeAiOauth;
+  if (!c) return `!no claudeAiOauth sign-in in .credentials.json (keys: ${Object.keys(j || {}).join(', ') || 'none'})`;
+  const tier = `${c.rateLimitTier || ''} ${c.subscriptionType || ''}`.toLowerCase();
+  planFromLogin = /20x/.test(tier) ? 'Max 20x' : /5x/.test(tier) ? 'Max 5x' : /max/.test(tier) ? 'Max'
+    : /team/.test(tier) ? 'Team' : /enterprise/.test(tier) ? 'Enterprise' : /pro/.test(tier) ? 'Pro' : null;
+  if (!c.accessToken) return '!sign-in has no access token';
+  if (c.expiresAt && c.expiresAt < Date.now()) {
+    return `!sign-in expired ${new Date(c.expiresAt).toLocaleString()} - run \`claude\` in a terminal once to refresh it`;
+  }
+  return c.accessToken;
 }
 
 const toEpoch = (iso) => (iso ? Math.floor(Date.parse(iso) / 1000) || 0 : 0);
@@ -220,8 +229,8 @@ async function refreshLimits() {
   if (!USE_LIMITS || Date.now() - limitsAt < 120e3) return;
   limitsAt = Date.now();
   const token = readLogin();
-  if (!token) { limitsErr = 'no Claude Code sign-in found'; return; }
   try {
+    if (token.startsWith('!')) throw new Error(token.slice(1));
     const r = await fetch('https://api.anthropic.com/api/oauth/usage', {
       headers: { Authorization: `Bearer ${token}`, 'anthropic-beta': 'oauth-2025-04-20' },
       signal: AbortSignal.timeout(10000),
@@ -319,6 +328,9 @@ async function main() {
     port = new SerialPort({ path: p, baudRate: 115200 }, (err) => {
       if (err) { log(`can't open ${p}: ${err.message}`); port = null; return setTimeout(connect, 5000); }
       log(`connected to ${p}`);
+      // Node leaves DTR asserted, which the board's auto-reset circuit turns into
+      // BOOT (GPIO0) held low = a fake button press. Release both lines.
+      port.set({ dtr: false, rts: false }, () => {});
       ready = false;
       // Opening the port resets the board; give it time to boot, then start anyway.
       setTimeout(onReady, 3000);
