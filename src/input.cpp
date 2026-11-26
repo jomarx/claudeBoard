@@ -1,0 +1,136 @@
+#include "input.h"
+
+static const int BOOT_PIN = 0;
+static const uint32_t LONG_MS = 700;
+static const uint32_t DEBOUNCE_MS = 30;
+
+// ---------- raw touch ----------
+
+#if defined(TOUCH_XPT2046)
+#include <SPI.h>
+
+// The XPT2046 sits on its own SPI bus (the display uses HSPI), so it gets VSPI.
+static SPIClass touchSpi(VSPI);
+static const SPISettings XPT_SPI(2000000, MSBFIRST, SPI_MODE0);
+
+static uint16_t xptRead(uint8_t cmd) {
+  touchSpi.transfer(cmd);
+  uint16_t v = touchSpi.transfer16(0) >> 3;  // 12-bit result
+  return v;
+}
+
+static void touchBegin() {
+  pinMode(XPT_CS, OUTPUT);
+  digitalWrite(XPT_CS, HIGH);
+  pinMode(XPT_IRQ, INPUT);  // GPIO36 is input-only, the board has the pull-up
+  touchSpi.begin(XPT_SCK, XPT_MISO, XPT_MOSI, XPT_CS);
+}
+
+static bool touchRaw(uint16_t &rx, uint16_t &ry, uint16_t &z) {
+  if (digitalRead(XPT_IRQ) == HIGH) return false;  // IRQ goes low while pressed
+  touchSpi.beginTransaction(XPT_SPI);
+  digitalWrite(XPT_CS, LOW);
+  uint16_t z1 = xptRead(0xB1);
+  uint16_t z2 = xptRead(0xC1);
+  z = z1 + 4095 - z2;
+  // Take a few samples and average; the first X/Y read after a Z read is noisy.
+  xptRead(0x91);
+  uint32_t sx = 0, sy = 0;
+  for (int i = 0; i < 4; i++) {
+    sy += xptRead(0x91);
+    sx += xptRead(0xD1);
+  }
+  xptRead(0xD0);  // power down, keep IRQ enabled
+  digitalWrite(XPT_CS, HIGH);
+  touchSpi.endTransaction();
+  rx = sx / 4;
+  ry = sy / 4;
+  return z > 300;
+}
+
+static bool touchRead(int &x, int &y) {
+  uint16_t rx, ry, z;
+  if (!touchRaw(rx, ry, z)) return false;
+#ifdef TOUCH_SWAP_XY
+  uint16_t t = rx; rx = ry; ry = t;
+#endif
+  x = map(rx, TOUCH_X_MIN, TOUCH_X_MAX, 0, 239);
+  y = map(ry, TOUCH_Y_MIN, TOUCH_Y_MAX, 0, 319);
+#ifdef TOUCH_INVERT_X
+  x = 239 - x;
+#endif
+#ifdef TOUCH_INVERT_Y
+  y = 319 - y;
+#endif
+  x = constrain(x, 0, 239);
+  y = constrain(y, 0, 319);
+#ifdef TOUCH_DEBUG
+  static uint32_t lastLog = 0;
+  if (millis() - lastLog > 250) {
+    lastLog = millis();
+    Serial.printf("{\"type\":\"touch\",\"rx\":%u,\"ry\":%u,\"z\":%u,\"x\":%d,\"y\":%d}\n", rx, ry, z, x, y);
+  }
+#endif
+  return true;
+}
+
+#else
+static void touchBegin() {}
+static bool touchRead(int &, int &) { return false; }
+#endif
+
+// ---------- gesture state ----------
+
+static bool tDown = false, tLongSent = false;
+static uint32_t tStart = 0, tLastSeen = 0;
+static int tx = 0, ty = 0;
+
+static bool bDown = false, bLongSent = false;
+static uint32_t bStart = 0;
+
+void inputBegin() {
+  pinMode(BOOT_PIN, INPUT_PULLUP);
+  touchBegin();
+}
+
+InputEvent inputPoll() {
+  InputEvent ev;
+  uint32_t now = millis();
+
+  // BOOT button
+  bool pressed = digitalRead(BOOT_PIN) == LOW;
+  if (pressed && !bDown) {
+    bDown = true; bLongSent = false; bStart = now;
+  } else if (pressed && bDown && !bLongSent && now - bStart > LONG_MS) {
+    bLongSent = true;
+    ev.kind = InputKind::ButtonLong;
+    return ev;
+  } else if (!pressed && bDown) {
+    bDown = false;
+    if (!bLongSent && now - bStart > DEBOUNCE_MS) {
+      ev.kind = InputKind::ButtonShort;
+      return ev;
+    }
+  }
+
+  // Touch. A finger is "released" after 60 ms without a reading, which
+  // smooths over the dropouts resistive panels produce.
+  int x, y;
+  if (touchRead(x, y)) {
+    tLastSeen = now;
+    if (!tDown) {
+      tDown = true; tLongSent = false; tStart = now; tx = x; ty = y;
+    } else if (!tLongSent && now - tStart > LONG_MS) {
+      tLongSent = true;
+      ev.kind = InputKind::LongPress; ev.x = tx; ev.y = ty;
+      return ev;
+    }
+  } else if (tDown && now - tLastSeen > 60) {
+    tDown = false;
+    if (!tLongSent && tLastSeen - tStart >= DEBOUNCE_MS) {
+      ev.kind = InputKind::Tap; ev.x = tx; ev.y = ty;
+      return ev;
+    }
+  }
+  return ev;
+}
