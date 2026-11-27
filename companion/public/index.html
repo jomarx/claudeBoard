@@ -58,6 +58,9 @@
   .app-row.new { border-top: 1px solid var(--line); margin-top: 4px; padding-top: 12px; }
   button.act:disabled { opacity: .4; cursor: default; }
   .empty { color: var(--dim); padding: 6px 0; }
+  .wifi-form { display: grid; grid-template-columns: 120px 1fr; gap: 6px 10px; align-items: center; max-width: 460px; }
+  .wifi-form label { color: var(--dim); font-size: 12px; }
+  code { font: 12px ui-monospace, Consolas, monospace; color: var(--muted); background: var(--bg); padding: 4px 6px; border-radius: 4px; }
 </style>
 </head>
 <body>
@@ -89,6 +92,45 @@
     <div class="row">
       <label for="interval">Update every</label>
       <div class="inline"><input id="interval" type="number" min="5" max="3600" data-key="interval"> seconds</div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Sync</h2>
+    <p class="lead">Where the board gets its data: the USB cable, or Wi-Fi from this PC. One at a time.
+      On Wi-Fi the cable only powers the board and carries setup.</p>
+    <div class="row">
+      <label>Sync over</label>
+      <div class="seg" data-board="sync">
+        <button type="button" data-v="usb">USB</button>
+        <button type="button" data-v="wifi">Wi-Fi</button>
+      </div>
+      <div class="hint" id="sync-hint"></div>
+    </div>
+    <div class="row">
+      <label>Wi-Fi boards</label>
+      <div id="lan-status">-</div>
+    </div>
+    <div class="row">
+      <label>Set up Wi-Fi</label>
+      <div class="wifi-form">
+        <label for="w-ssid">Network</label><input type="text" id="w-ssid" maxlength="32" placeholder="Wi-Fi name (SSID)">
+        <label for="w-pass">Password</label><input type="password" id="w-pass" maxlength="64" placeholder="sent to the board only, not saved here">
+        <label for="w-ip">Board IP</label><input type="text" id="w-ip" maxlength="15" placeholder="fixed, e.g. 192.168.1.50">
+        <label for="w-gw">Gateway</label><input type="text" id="w-gw" maxlength="15" placeholder="the router, e.g. 192.168.1.1">
+        <label for="w-mask">Subnet mask</label><input type="text" id="w-mask" maxlength="15" placeholder="255.255.255.0">
+        <label for="w-dns">DNS</label><input type="text" id="w-dns" maxlength="15" placeholder="empty = the gateway">
+        <label for="w-host">Server (this PC)</label><input type="text" id="w-host" maxlength="15" list="w-hosts" placeholder="this PC's fixed IP">
+        <datalist id="w-hosts"></datalist>
+        <span></span><div class="inline"><button class="act" id="w-send" type="button">Send to the board over USB and switch to Wi-Fi</button></div>
+      </div>
+      <div class="hint">The board must be plugged in. Pick a board IP outside the router's DHCP range;
+        this PC needs a fixed IP too. Windows may ask to allow the companion on the network: allow it for private networks.</div>
+    </div>
+    <div class="row">
+      <label>Pairing token</label>
+      <div class="inline"><code id="lan-token"></code><button class="act" id="lan-token-new" type="button">New token</button></div>
+      <div class="hint">Boards must present it. A new one disconnects every Wi-Fi board until its Wi-Fi setup is sent again.</div>
     </div>
   </section>
 
@@ -328,6 +370,7 @@ function render(s) {
   }
   renderApps(c.apps);
   renderWeather(c.weather, s.weather);
+  renderSync(s);
   // Each slider shows its value in the span right after it.
   for (const r of document.querySelectorAll('input[type=range]')) r.nextElementSibling.textContent = r.value;
   $('startup').checked = s.startup;
@@ -337,6 +380,54 @@ function render(s) {
   log.textContent = s.log.join('\n');
   if (atBottom) log.scrollTop = log.scrollHeight;
 }
+
+// ---------- sync (USB or Wi-Fi) ----------
+
+const WIFI_FIELDS = ['ssid', 'ip', 'gw', 'mask', 'dns', 'host'];
+let wifiFilled = false;
+
+function renderSync(s) {
+  const wifi = s.config.board.sync === 'wifi';
+  const boards = s.boards.filter((b) => b.link === 'wifi');
+  $('sync-hint').textContent = wifi
+    ? 'Switching back to USB works from here at any time.'
+    : 'Choose Wi-Fi with the form below, so the board has its network settings first.';
+  let st;
+  if (!wifi) st = 'Off while Sync is USB.';
+  else if (s.lan.error) st = 'Not listening: ' + s.lan.error;
+  else if (!boards.length) st = `Listening on port ${s.lan.port || s.config.lan.port}; no board connected yet.`;
+  else st = boards.map((b) => `${b.path}${b.fw ? ' · fw ' + b.fw : ''}${b.ready ? '' : ' (starting)'}${b.rssi ? ' · ' + b.rssi + ' dBm' : ''}`).join(', ');
+  $('lan-status').textContent = st;
+  $('lan-token').textContent = s.config.lan.token;
+
+  // Fill the form once from the last setup sent; this PC's addresses as server suggestions.
+  const hosts = $('w-hosts');
+  if (hosts.children.length !== s.lan.addresses.length) {
+    hosts.replaceChildren(...s.lan.addresses.map((a) => Object.assign(document.createElement('option'), { value: a.address, label: a.name })));
+  }
+  if (!wifiFilled) {
+    wifiFilled = true;
+    for (const k of WIFI_FIELDS) $('w-' + k).value = s.config.wifi[k] || '';
+    if (!$('w-host').value && s.lan.addresses.length) $('w-host').value = s.lan.addresses[0].address;
+  }
+}
+
+$('w-send').addEventListener('click', async () => {
+  const body = { action: 'wifi-setup', pass: $('w-pass').value };
+  for (const k of WIFI_FIELDS) body[k] = $('w-' + k).value.trim();
+  $('w-send').disabled = true;
+  try {
+    render(await api('/api/action', body));
+    $('w-pass').value = '';
+    alertBox('');
+    flashSaved();
+  } catch (e) { alertBox('Wi-Fi setup: ' + e.message); }
+  finally { $('w-send').disabled = false; }
+});
+
+$('lan-token-new').addEventListener('click', async () => {
+  try { render(await api('/api/action', { action: 'lan-token' })); } catch (e) { alertBox(e.message); }
+});
 
 // ---------- weather ----------
 

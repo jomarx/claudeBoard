@@ -9,6 +9,7 @@
 #include "input.h"
 #include "settings.h"
 #include "led.h"
+#include "net.h"
 
 UsageData g_usage;
 Settings g_settings;
@@ -249,8 +250,11 @@ void setup() {
   uiRender(shown, alert);
   dirty = false;
   pageChanged = false;
-  protocolSendHello();
-  protocolSendSettings();
+  protocolSendHello(Serial, false);
+  protocolSendSettings(Serial);
+  // Wi-Fi last: the screen's 76.8 KB band buffer is already allocated (uiBegin), before the
+  // Wi-Fi stack breaks up the heap.
+  netBegin();
 }
 
 // Things on screen that change with time alone: the minute (the second on the clock
@@ -261,6 +265,9 @@ static uint32_t timeSignature() {
     uint32_t age = millis() - g_lastFrameMs;
     sig = sig * 4 + (age < STALE_AFTER_MS ? 1 : age < OFFLINE_AFTER_MS ? 2 : 3);
   }
+  // The waiting screen shows the Wi-Fi and server state.
+  if (g_settings.sync == SyncMode::Wifi)
+    sig = sig * 4 + (netServerConnected() ? 3 : !strcmp(netWifiState(), "connected") ? 2 : 1);
   return sig;
 }
 
@@ -279,11 +286,17 @@ static void applySettings(const Settings &before) {
     lastPageMs = millis();
   }
   settingsSave();
+  if (s.sync != before.sync) netApply();   // radio on for Wi-Fi, off for USB
 }
 
 void loop() {
   Requests req;
   protocolPoll(req);
+  netLoop(req);
+  if (req.net) {
+    netApply();   // new Wi-Fi settings: reconnect with them (only does anything in Wi-Fi mode)
+    dirty = true;
+  }
   if (req.config) {
     applySettings(req.before);
     dirty = true;

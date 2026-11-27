@@ -39,9 +39,24 @@
 //   {"type":"media","state":"playing","app":"Spotify","title":"...","artist":"..."}
 //       -> now playing on the PC; state "playing" | "paused" | "stopped" | "none" (no session).
 //   {"type":"preview","view":"alert"|"back"}           -> show an overlay to test it
+//   {"type":"wifi","ssid":"...","pass":"...","ip":"192.168.1.50","gw":"192.168.1.1",
+//    "mask":"255.255.255.0","dns":"192.168.1.1","host":"192.168.1.20","port":47821,"token":"..."}
+//       -> USB ONLY: stores the Wi-Fi network, the board's fixed address, the server and the
+//       pairing token; answers with net. Refused over Wi-Fi. "sync":"wifi" in cfg then uses it.
+//   {"type":"net"}                                     -> device answers with net
+//   {"type":"authok"}                                  (server accepted the token; nothing to do)
+//
+// Over Wi-Fi the same messages travel one per WebSocket text message, on ws://host:port/board.
+// The board's first message there is {"type":"auth","token":"..."}, then hello and cfg.
+// Replies go back on the link the request came in on; events go to the Sync link.
 //
 // Device -> host
-//   {"type":"hello","fw":"0.4.0","w":240,"h":320,"cfg":true,"apps":true}   (on boot)
+//   {"type":"hello","fw":"0.5.0","w":240,"h":320,"cfg":true,"apps":true,"net":true,
+//    "link":"usb"|"wifi"}                              (on boot, on Wi-Fi connect, on request)
+//   {"type":"net","sync":"usb"|"wifi","configured":true,"ssid":"...","ip":"...","gw":"...",
+//    "mask":"...","dns":"...","host":"...","port":47821,"wifi":"connected"|"connecting"|"off",
+//    "server":"connected"|"not connected","rssi":-60,"heap":...,"largest":...}
+//                                                      (never the password or the token)
 //   {"type":"cfg",...all settings above...}            (after hello and after every cfg)
 //   {"type":"ack","seq":1}
 //   {"type":"err","msg":"..."}
@@ -64,11 +79,18 @@ struct Requests {
   bool weather = false;   // a weather frame arrived
   bool media = false;     // a media (now playing) frame arrived
   int preview = -1;       // 0 = alert, 1 = back
+  bool net = false;       // new Wi-Fi settings were stored
 };
+
+// Which link a message came in on; its replies go back the same way.
+enum class Link : uint8_t { Usb, Wifi };
 
 void protocolBegin();
 // Reads whatever is waiting on Serial.
 void protocolPoll(Requests &req);
-void protocolSendHello();
-void protocolSendSettings();
+// One message from either link (net.cpp feeds the Wi-Fi ones in).
+void protocolHandleLine(const char *line, Requests &req, Link link);
+void protocolSendHello(Print &out, bool overWifi);
+void protocolSendSettings(Print &out);
+// Goes to the Sync link: Wi-Fi when that's chosen and connected, else USB.
 void protocolSendEvent(const char *name, int value);

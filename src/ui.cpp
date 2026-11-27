@@ -1,4 +1,5 @@
 #include "ui.h"
+#include "net.h"
 #include "model.h"
 #include <TFT_eSPI.h>
 #include <time.h>
@@ -219,9 +220,27 @@ static void drawWaiting(int page) {
   header("Claude meter", C_BG);
   int y = land ? 50 : 100;
   g.text("Waiting for", W / 2, y, 4, C_TEXT, C_BG, TC_DATUM);
-  g.text("USB data", W / 2, y + 30, 4, C_TEXT, C_BG, TC_DATUM);
-  g.text("Run the host script on", W / 2, y + 80, 2, C_MUTED, C_BG, TC_DATUM);
-  g.text("your PC to start the feed.", W / 2, y + 98, 2, C_MUTED, C_BG, TC_DATUM);
+  if (g_settings.sync == SyncMode::Wifi) {
+    // Say which step it's stuck on: no settings, joining the network, or reaching the server.
+    const NetSettings &n = netSettings();
+    char a[64], b[64];
+    g.text("Wi-Fi data", W / 2, y + 30, 4, C_TEXT, C_BG, TC_DATUM);
+    if (!n.configured()) {
+      strlcpy(a, "No Wi-Fi settings yet:", sizeof a);
+      strlcpy(b, "send them from the companion.", sizeof b);
+    } else {
+      snprintf(a, sizeof a, "%s: %s", n.ssid, netWifiState());
+      snprintf(b, sizeof b, "server %s:%u %s", n.host, n.port, netServerConnected() ? "up" : "not reached");
+    }
+    fitText(a, sizeof a, 2, W - 24);
+    fitText(b, sizeof b, 2, W - 24);
+    g.text(a, W / 2, y + 80, 2, C_MUTED, C_BG, TC_DATUM);
+    g.text(b, W / 2, y + 98, 2, C_MUTED, C_BG, TC_DATUM);
+  } else {
+    g.text("USB data", W / 2, y + 30, 4, C_TEXT, C_BG, TC_DATUM);
+    g.text("Run the host script on", W / 2, y + 80, 2, C_MUTED, C_BG, TC_DATUM);
+    g.text("your PC to start the feed.", W / 2, y + 98, 2, C_MUTED, C_BG, TC_DATUM);
+  }
   char v[24];
   snprintf(v, sizeof v, "fw %s", FW_VERSION);
   g.text(v, W / 2, navTop() - 24, 2, C_DIM, C_BG, TC_DATUM);

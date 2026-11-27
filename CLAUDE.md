@@ -59,8 +59,8 @@ flags until the setting is changed on the page (`effective()` in `main.js`).
 - `companion.js` is only the entry point; the code is in `src/`: `main.js` (CLI flags, wiring, settings
   page handlers), `usage.js` (log scan, limits, frames), `board.js` (serial, reconnect, hello handshake),
   `config.js` (defaults + validation, `%APPDATA%\claudeBoard\config.json`), `server.js`, `tray.js`
-  (tray icon, window raising, media session and keys), `launcher.js`, `weather.js`, `media.js`, `text.js`
-  (ASCII for the board), `startup.js` (HKCU Run value), `log.js`. The page is `public/index.html` (no framework).
+  (tray icon, window raising, media session and keys), `hub.js` / `netboard.js` / `lan.js` (Wi-Fi sync),
+  `launcher.js`, `weather.js`, `media.js`, `text.js` (ASCII for the board), `startup.js` (HKCU Run value), `log.js`. The page is `public/index.html` (no framework).
 - Keep it CommonJS: pkg bundles CommonJS reliably, ESM not.
 - Any new setting goes in `config.js` `normalize()` (all input passes through it), the page, and for
   board settings also `Settings` in `src/model.h`, `applyConfig`/`protocolSendSettings` and `settings.cpp`.
@@ -72,9 +72,9 @@ flags until the setting is changed on the page (`effective()` in `main.js`).
   `StreamReader` because `Console.In.ReadLineAsync` blocks in .NET Framework, and it exits when
   stdin closes, so it never outlives the companion.
 
-## Status (0.4.0)
+## Status (0.5.0)
 
-- Firmware 0.4.0, companion 0.4.0. Seven screens in `View` (`src/ui.h`): Main, Today, Clock, Weather, Media,
+- Firmware 0.5.0, companion 0.5.0. Seven screens in `View` (`src/ui.h`): Main, Today, Clock, Weather, Media,
   Calendar, Launcher, plus the Alert and Back overlays. Each pageable screen has a nav bar (prev, next, page
   dots, play/pause of the auto page change); tap targets come from `uiHitTest` (`ui.cpp`), actions from
   `handleTap` (`main.cpp`). Text that may not fit goes through `fitText` (`ui.cpp`).
@@ -104,6 +104,17 @@ flags until the setting is changed on the page (`effective()` in `main.js`).
   renews it (the desktop app's sign-in is not in that file). Claude credentials never go to the board.
 - Every commit is reviewed by `.githooks/post-commit` (headless, read-only `claude -p`, results in `reviews/`,
   git-ignored); enable per clone with `git config core.hooksPath .githooks`.
+- Wi-Fi sync (0.5.0): Sync is USB **or** Wi-Fi (board setting `sync`), never both. Over Wi-Fi the board
+  (`src/net.cpp`: station with a fixed IP + `links2004/WebSockets` client) sends `auth` with the pairing
+  token, then the same protocol messages as USB, one per WebSocket message. `protocolHandleLine(line, req,
+  link)` answers on the link a message came from; events go to the Sync link (`protocolEventOut`). Network
+  settings live in NVS namespace `net`, outside `Settings`, so the password and token are never echoed;
+  they arrive only in a `wifi` message over USB. The companion's `hub.js` holds the USB `Board` and any
+  `NetBoard`s (`netboard.js`, both `BoardLink`s from `board.js`): data to the Sync side, `cfg` to every
+  link. `lan.js` listens on `0.0.0.0:<lan.port>` (default 47821) only while Sync is Wi-Fi; the settings
+  page stays on 127.0.0.1. Test the LAN side without hardware: `node tools/fake_wifi_board.js host port token`.
+  Measured on the board: largest free block 70 KB before Wi-Fi, 45 KB with it (the screen buffer is
+  allocated before Wi-Fi starts).
 - Debug switches `-DBOOT_SELFTEST=1` and `-DTOUCH_DEBUG=1` are commented out in `platformio.ini`.
 - Tested over serial on the board: every screen, style and state in portrait and landscape, cfg echo, NVS
   across a reset, reconnect. Not yet checked by eye on the glass: the layouts, landscape taps, the media
@@ -111,10 +122,12 @@ flags until the setting is changed on the page (`effective()` in `main.js`).
 
 ## Next steps
 
-1. Check the items above on the glass; tune layouts in `ui.cpp` (geometry is in small `*Geo` functions or
+1. Wi-Fi sync phase 4 (setup page on the board itself, `portal.cpp`, BOOT held 5 s) and phase 5 (Network
+   screen, link mark in the header) from the Wi-Fi plan; then a test on the real network.
+2. Check the items above on the glass; tune layouts in `ui.cpp` (geometry is in small `*Geo` functions or
    at the top of each `draw*`), and the wipe strip size/delay in `uiRender` if it looks slow or tears.
-2. Exe icon/version resources (not set yet; editing resources after pkg can break its payload).
-3. Ideas not started: degrees F / mph for weather, alert beeps on the unused speaker (amp enable GPIO 4).
+3. Exe icon/version resources (not set yet; editing resources after pkg can break its payload).
+4. Ideas not started: degrees F / mph for weather, alert beeps on the unused speaker (amp enable GPIO 4).
 
 ## Build notes (Windows)
 
