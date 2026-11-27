@@ -321,7 +321,9 @@ static void drawMainLand() {
 static void tile(int x, int y, const char *label, const char *value, const char *suffix, int w = 104) {
   g.rrect(x, y, w, 50, 4, C_TRACK);
   g.text(label, x + 8, y + 5, 2, C_MUTED, C_TRACK);
-  int vw = g.text(value, x + 8, y + 22, 4, C_TEXT, C_TRACK);
+  // Narrow landscape tiles can't fit a long value like "$123.45" in font 4.
+  const bool big = g.width(value, 4) <= w - 16;
+  int vw = g.text(value, x + 8, y + (big ? 22 : 28), big ? 4 : 2, C_TEXT, C_TRACK);
   if (suffix && 8 + vw + 4 + g.width(suffix, 2) <= w)
     g.text(suffix, x + 8 + vw + 4, y + 30, 2, C_GREEN, C_TRACK);
 }
@@ -659,8 +661,8 @@ static void drawClockBinary(const struct tm &tm) {
     char d[2] = {(char)('0' + digits[i]), 0};
     g.text(d, x, top + 3 * rs + r + 10, 4, C_MUTED, C_BG, TC_DATUM);
   }
-  // Under the header on the right: below the digits there's no room above the nav bar.
-  if (ampm) g.text(ampm, W - 12, 30, 2, C_MUTED, C_BG, TR_DATUM);
+  // The hours-tens column has only 2 bits, so its 8 and 4 rows are empty: am/pm goes there.
+  if (ampm) g.text(ampm, x0, top + rs / 2, 2, C_MUTED, C_BG, MC_DATUM);
 }
 
 static void drawClock() {

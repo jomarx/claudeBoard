@@ -211,8 +211,12 @@ async function run() {
     async action(name, body = {}) {
       switch (name) {
         // A relative step lets the board wrap around however many screens it has.
-        case 'next': board.send({ type: 'screen', step: 1 }); break;
-        case 'prev': board.send({ type: 'screen', step: -1 }); break;
+        // Firmware before 0.3 reads a step as "screen 0", so don't send it one.
+        case 'next':
+        case 'prev':
+          if (board.state.ready && !board.state.screens) throw new Error('the board firmware is older than 0.3.0; flash it to page from here');
+          board.send({ type: 'screen', step: name === 'next' ? 1 : -1 });
+          break;
         case 'launch': {
           const a = effective().apps[Number(body.index)];
           if (!a) throw new Error('no such app');

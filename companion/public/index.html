@@ -258,7 +258,7 @@ function render(s) {
   const dot = !b.connected ? 'bad' : b.ready ? 'ok' : 'warn';
   $('s-board').innerHTML = `<span class="dot ${dot}"></span>`;
   $('s-board').append(b.connected ? b.path : (b.path ? b.path + ' (closed)' : 'not found'));
-  $('s-fw').textContent = b.fw ? b.fw + (b.cfgCapable ? '' : ' (update for settings)') : '-';
+  $('s-fw').textContent = b.fw ? b.fw + (!b.cfgCapable ? ' (update for settings)' : !b.screens ? ' (flash 0.3 for the new screens)' : '') : '-';
   const f = s.lastFrame;
   $('s-last').textContent = f ? ago(f.at) : 'never';
   $('s-today').textContent = f ? `${(f.tokens / 1e6).toFixed(1)}M tok · $${f.cost.toFixed(2)}` : '-';
@@ -334,8 +334,11 @@ async function saveApps(list) {
 function renderApps(list) {
   const box = $('apps');
   $('app-add').disabled = list.length >= MAX_APPS;
-  // Don't rebuild the rows under the cursor; the next poll catches up.
-  if (box.contains(document.activeElement)) return;
+  // Don't rebuild under a text field being typed in; the next poll catches up. A focused
+  // button (↑ ↓ Remove) doesn't count: its row has to update right away, or the next
+  // click reads stale rows.
+  const a = document.activeElement;
+  if (a && a.tagName === 'INPUT' && box.contains(a)) return;
   const key = JSON.stringify(list);
   if (key === appsShown) return;
   appsShown = key;

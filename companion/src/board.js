@@ -41,7 +41,7 @@ class Board extends EventEmitter {
     this.bootTimer = null;
     this.stopped = false;
     this.state = {
-      path: null, connected: false, ready: false, fw: null, cfgCapable: false,
+      path: null, connected: false, ready: false, fw: null, cfgCapable: false, screens: false,
       boardCfg: null, lastAckAt: 0, error: '',
     };
   }
@@ -118,7 +118,7 @@ class Board extends EventEmitter {
         this.helloAskedAt = Date.now();
         this.send({ type: 'hello' });
       });
-      this.status({ path: p, connected: true, ready: false, fw: null, cfgCapable: false, boardCfg: null, error: '' });
+      this.status({ path: p, connected: true, ready: false, fw: null, cfgCapable: false, screens: false, boardCfg: null, error: '' });
       // Opening the port resets the board; give it time to boot, then start anyway.
       this.bootTimer = setTimeout(() => this.markReady(), 3000);
     });
@@ -161,7 +161,8 @@ class Board extends EventEmitter {
         log(`board firmware ${m.fw}`);
         const wasReady = this.state.ready;
         const isReply = Date.now() - (this.helloAskedAt || 0) < 4000;
-        this.status({ fw: m.fw, cfgCapable: !!m.cfg });
+        // "apps" in hello = firmware 0.3+: five screens, relative steps, launcher, rotation 0-3.
+        this.status({ fw: m.fw, cfgCapable: !!m.cfg, screens: !!m.apps });
         // An unasked hello after we started means it rebooted and lost its data.
         if (!wasReady) this.markReady();
         else if (!isReply) this.emit('ready');

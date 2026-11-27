@@ -43,6 +43,8 @@ public static class Fg {
 
   // Visible, titled, unowned top-level windows of these processes, front-most first.
   public static long[] Windows(uint[] pids) {
+    // PowerShell passes an empty array as null; that just means no windows yet.
+    if (pids == null || pids.Length == 0) return new long[0];
     var want = new HashSet<uint>(pids);
     var found = new List<long>();
     EnumWindows((h, l) => {
@@ -74,8 +76,9 @@ public static class Fg {
 }
 '@
 
+# The leading comma keeps an empty result an empty array instead of PowerShell's $null.
 function ProcIds($names) {
-  [uint32[]]@(Get-Process -Name $names -ErrorAction SilentlyContinue | ForEach-Object { $_.Id })
+  ,[uint32[]]@(Get-Process -Name $names -ErrorAction SilentlyContinue | ForEach-Object { $_.Id })
 }
 
 # Apps waiting to be raised: their process names, the windows they had at launch, when.
@@ -159,10 +162,13 @@ $timer.add_Tick({
     } elseif ($p[0] -eq 'startup') {
       $startup.Checked = ($p[1] -eq '1')
     } elseif ($p[0] -eq 'front' -and $p.Length -ge 2) {
-      $names = @($p[1].Split(',') | Where-Object { $_ })
-      if ($names.Count) {
-        [void]$script:fronts.Add(@{ names = $names; at = [DateTime]::UtcNow; before = [Fg]::Windows((ProcIds $names)) })
-      }
+      # Never let this throw: the tick would end before the next stdin read is armed.
+      try {
+        $names = @($p[1].Split(',') | Where-Object { $_ })
+        if ($names.Count) {
+          [void]$script:fronts.Add(@{ names = $names; at = [DateTime]::UtcNow; before = [Fg]::Windows((ProcIds $names)) })
+        }
+      } catch { Send ("log|front failed: " + $_.Exception.Message) }
     }
     $script:task = $reader.ReadLineAsync()
   }

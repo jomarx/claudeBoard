@@ -1,0 +1,18 @@
+#!/bin/sh
+# Code review on every commit: starts a headless, read-only Claude Code review of the new
+# commit in the background and returns at once, so committing isn't slowed down. Findings
+# land in reviews/ (git-ignored); see .githooks/review-commit.sh.
+#
+# Enabled per clone with:  git config core.hooksPath .githooks
+# Skip one commit with:    CLAUDEBOARD_NO_REVIEW=1 git commit ...
+
+[ -n "$CLAUDEBOARD_NO_REVIEW" ] && exit 0
+command -v claude >/dev/null 2>&1 || exit 0
+# Rebases and cherry-picks replay commits that were already reviewed.
+case "$GIT_REFLOG_ACTION" in rebase*|cherry-pick*) exit 0 ;; esac
+
+root=$(git rev-parse --show-toplevel) || exit 0
+sha=$(git rev-parse HEAD) || exit 0
+mkdir -p "$root/reviews"
+nohup sh "$root/.githooks/review-commit.sh" "$sha" >/dev/null 2>&1 &
+exit 0

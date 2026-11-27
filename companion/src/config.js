@@ -43,7 +43,9 @@ const CLOCK_STYLES = ['digital', 'analog', 'rings', 'flip', 'words', 'binary']; 
 function normalizeApp(a) {
   if (!a || typeof a !== 'object') return null;
   const str = (v, n) => (typeof v === 'string' ? v.trim().slice(0, n) : '');
-  const name = str(a.name, 15), path = str(a.path, 512), args = str(a.args, 512);
+  // Explorer's "Copy as path" wraps the path in quotes; the quotes aren't part of it.
+  const path = str(a.path, 514).replace(/^"(.*)"$/, '$1').trim().slice(0, 512);
+  const name = str(a.name, 15), args = str(a.args, 512);
   return name && path ? { name, path, args } : null;
 }
 
