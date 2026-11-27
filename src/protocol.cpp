@@ -37,7 +37,7 @@ static void copyAscii(char *dst, size_t n, const char *src) {
 }
 
 static const char *FX_NAMES[] = {"none", "wipe", "fade"};
-static const char *CLOCK_NAMES[CLOCK_STYLES] = {"digital", "analog", "rings", "flip", "words", "binary"};
+static const char *CLOCK_NAMES[CLOCK_STYLES] = {"digital", "analog", "rings", "flip", "words", "binary", "dots"};
 static const char *LED_NAMES[LED_MODES] = {"off", "usage", "alerts"};
 static const char *SYNC_NAMES[2] = {"usb", "wifi"};
 

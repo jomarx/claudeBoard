@@ -45,7 +45,7 @@ const clampInt = (v, lo, hi, def) => {
 };
 
 const MAX_APPS = 8;   // the board's launcher grid (MAX_APPS in src/model.h)
-const CLOCK_STYLES = ['digital', 'analog', 'rings', 'flip', 'words', 'binary'];   // CLOCK_NAMES in src/protocol.cpp
+const CLOCK_STYLES = ['digital', 'analog', 'rings', 'flip', 'words', 'binary', 'dots'];   // CLOCK_NAMES in src/protocol.cpp
 
 // One launcher tile, or null if it has no name or nothing to open. The name is what the
 // board shows (15 chars, its fonts are ASCII); path is a program, file, folder or URL.

@@ -692,23 +692,29 @@ static void drawClockWords(const struct tm &tm) {
   for (int i = 0; i < 4; i++) g.circle(W / 2 - 27 + i * 18, dy, 3, i < extra ? C_CORAL : C_TRACK);
 }
 
-// Binary: BCD columns for HH MM SS, 8-4-2-1 from the top, the digits underneath.
-static void drawClockBinary(const struct tm &tm) {
+// Binary: BCD columns for HH MM SS, 8-4-2-1 from the top. With digits, the decimal digits
+// sit under the columns; without (the "dots" style), the grid is centred between the header
+// and the nav bar, with bigger dots.
+static void drawClockBinary(const struct tm &tm, bool withDigits) {
   const char *ampm;
   const int hour = clockHour(tm, &ampm);
   const int digits[6] = {hour / 10, hour % 10, tm.tm_min / 10, tm.tm_min % 10, tm.tm_sec / 10, tm.tm_sec % 10};
   static const uint8_t bits[6] = {2, 4, 3, 4, 3, 4};   // a tens digit never needs all four
   const uint16_t colors[3] = {C_CORAL, C_GREEN, C_AMBER};
-  const int sp = land ? 44 : 34, pair = land ? 14 : 10, r = land ? 13 : 11;
-  const int x0 = (W - (5 * sp + 2 * pair)) / 2, top = land ? 46 : 58, rs = land ? 34 : 36;
+  const int sp = land ? 44 : 34, pair = land ? 14 : 10, rs = land ? 34 : 36;
+  const int r = (land ? 13 : 11) + (withDigits ? 0 : 2);
+  const int x0 = (W - (5 * sp + 2 * pair)) / 2;
+  const int top = withDigits ? (land ? 46 : 58) : (24 + navTop()) / 2 - 3 * rs / 2;
   for (int i = 0; i < 6; i++) {
     const int x = x0 + i * sp + (i / 2) * pair;
     for (int b = 0; b < bits[i]; b++) {
       const bool on = digits[i] & (1 << b);
       g.circle(x, top + (3 - b) * rs, r, on ? colors[i / 2] : C_TRACK);
     }
-    char d[2] = {(char)('0' + digits[i]), 0};
-    g.text(d, x, top + 3 * rs + r + 10, 4, C_MUTED, C_BG, TC_DATUM);
+    if (withDigits) {
+      char d[2] = {(char)('0' + digits[i]), 0};
+      g.text(d, x, top + 3 * rs + r + 10, 4, C_MUTED, C_BG, TC_DATUM);
+    }
   }
   // The hours-tens column has only 2 bits, so its 8 and 4 rows are empty: am/pm goes there.
   if (ampm) g.text(ampm, x0, top + rs / 2, 2, C_MUTED, C_BG, MC_DATUM);
@@ -734,7 +740,8 @@ static void drawClock() {
     case ClockStyle::Rings: drawClockRings(tm); break;
     case ClockStyle::Flip: drawClockFlip(tm); break;
     case ClockStyle::Words: drawClockWords(tm); break;
-    case ClockStyle::Binary: drawClockBinary(tm); break;
+    case ClockStyle::Binary: drawClockBinary(tm, true); break;
+    case ClockStyle::Dots: drawClockBinary(tm, false); break;
     default: drawClockDigital(tm); break;
   }
   navBar((int)View::Clock);

@@ -22,7 +22,7 @@
 //       (hello's w/h stay the panel's native 240x320); cycle: seconds between automatic page
 //       changes (0 off); fx: "none" | "wipe" | "fade"; dim: idle seconds (0 never);
 //       clock: the clock screen's face, "digital" | "analog" | "rings" | "flip" | "words" |
-//       "binary"; led: the back LED, "off" | "usage" | "alerts"; ledlvl: its brightness 0-255.
+//       "binary" | "dots" (binary without the digit row); led: the back LED, "off" | "usage" | "alerts"; ledlvl: its brightness 0-255.
 //       Every field is optional; {"type":"cfg"} alone just asks for the current values.
 //       Settings are saved on the board and survive a reboot.
 //   {"type":"screen","n":0}                            -> jump to a screen: 0 main, 1 today,
