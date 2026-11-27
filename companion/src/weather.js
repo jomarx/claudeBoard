@@ -46,8 +46,13 @@ async function refreshWeather(cfg, force = false) {
     current: 'temperature_2m,relative_humidity_2m,apparent_temperature,is_day,weather_code,wind_speed_10m',
     daily: 'temperature_2m_max,temperature_2m_min,precipitation_probability_max',
   });
+  // The timer and a location change on the page both call this, and nothing serialises
+  // them: if the place changed while this request was out, its answer (or failure) is for
+  // a place no longer shown, so it's dropped.
+  const stillWanted = () => weatherState.key === key;
   try {
     const j = await getJSON(`https://api.open-meteo.com/v1/forecast?${q}`);
+    if (!stillWanted()) return;
     const c = j.current || {}, d = j.daily || {};
     const first = (a) => (Array.isArray(a) ? a[0] : undefined);
     const t = round(c.temperature_2m);
@@ -68,6 +73,7 @@ async function refreshWeather(cfg, force = false) {
     weatherState.error = '';
     weatherState.seq++;
   } catch (e) {
+    if (!stillWanted()) return;
     const msg = e.name === 'TimeoutError' ? 'weather request timed out' : e.message;
     if (msg !== weatherState.error) log('weather:', msg);
     weatherState.error = msg;
