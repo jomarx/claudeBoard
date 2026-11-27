@@ -128,16 +128,32 @@ flags until the setting is changed on the page (`effective()` in `main.js`).
   header shows a Wi-Fi mark (green server up, amber network only, red no network).
 - Debug switches `-DBOOT_SELFTEST=1` and `-DTOUCH_DEBUG=1` are commented out in `platformio.ini`.
 - Tested over serial on the board: every screen, style and state in portrait and landscape, cfg echo, NVS
-  across a reset, reconnect. Not yet checked by eye on the glass: the layouts, landscape taps, the media
-  keys acting on the PC, the LED colours, apps coming to the front, the tray icon.
+  across a reset, reconnect. Checked by eye on the glass 2026-11-27 (after the colour fix): every page's
+  layout and taps in landscape and portrait, all seven clock styles, media keys acting on the PC, launcher
+  apps coming to the front, the alert overlay, the LED colours, the tray icon.
 
 ## Next steps
 
+Where things stand (2026-11-27, moving from the work PC to a home PC): work is on branch `wifi-sync`,
+all pushed. The board is flashed with the current firmware (colour fix included) and every USB-mode
+item has been checked on the glass. Only Wi-Fi is untested.
+
+Setting up the home PC: clone, `git checkout wifi-sync`, `git config core.hooksPath .githooks`,
+`cd companion && npm install`. The board's COM port will differ there (the CH340 is auto-detected; find
+it in Device Manager for `pio ... --upload-port`). The companion's config (`%APPDATA%\claudeBoard`) is
+per PC and is not in git. A fresh one starts from the `config.js` defaults, and the companion sends its
+`cfg` to the board on connect, so the board's saved settings get overwritten by those defaults. Set them
+back on the page: the work PC had rot 3 (landscape flipped), clock "dots", cycle 20 s, fx wipe, dim 120 s,
+brightness 5, LED off (ledlvl 247), alerts 80/90, 24 h, sync usb; plus the weather place and launcher
+apps (5 tiles, PC-specific paths). The board itself is fine as flashed; reflash only after firmware changes. See Build notes below if `pio` fails.
+
 1. Test Wi-Fi sync on the real network (the setup form or the page), and the on-board setup from a phone;
-   the PC used so far has no Wi-Fi adapter, so neither was possible from it.
-2. Check the items above on the glass; tune layouts in `ui.cpp` (geometry is in small `*Geo` functions or
-   at the top of each `draw*`), and the wipe strip size/delay in `uiRender` if it looks slow or tears.
-3. Exe icon/version resources (not set yet; editing resources after pkg can break its payload).
+   the PC used so far has no Wi-Fi adapter, so neither was possible from it. The PC and the board must be
+   on the same network; allow inbound TCP 47821 (`lan.port`) in Windows Firewall for the companion. The
+   board connects to the companion over Wi-Fi, so leave the USB cable for power only, or test from a
+   phone charger. Without hardware: `node tools/fake_wifi_board.js host port token`.
+2. Exe icon/version resources (not set yet; editing resources after pkg can break its payload).
+3. Merge `wifi-sync` into `main` once step 1 is done.
 4. Ideas not started: degrees F / mph for weather, alert beeps on the unused speaker (amp enable GPIO 4).
 
 ## Build notes (Windows)
