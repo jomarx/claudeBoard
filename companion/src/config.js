@@ -15,6 +15,7 @@ const DEFAULTS = {
   limits: false,          // ask Claude's servers for real plan limits (undocumented endpoint)
   sessionBudget: 0,       // without limits: tokens that count as 100% of a 5-hour window
   plan: '',               // label on the meter; empty = from the sign-in
+  apps: [],               // launcher tiles: { name, path, args }, at most MAX_APPS
   startup: false,         // start with Windows (mirrors the registry Run value)
   board: {
     brightness: 200,      // 5-255
@@ -25,6 +26,7 @@ const DEFAULTS = {
     cycle: 0,             // seconds between automatic screen changes, 0 = off
     fx: 'none',           // 'none' | 'wipe' | 'fade'
     dim: 120,             // idle seconds before dimming, 0 = never
+    clock: 'digital',     // clock screen face: 'digital' | 'analog'
   },
 };
 
@@ -32,6 +34,17 @@ const clampInt = (v, lo, hi, def) => {
   const n = Math.round(Number(v));
   return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : def;
 };
+
+const MAX_APPS = 8;   // the board's launcher grid (MAX_APPS in src/model.h)
+
+// One launcher tile, or null if it has no name or nothing to open. The name is what the
+// board shows (15 chars, its fonts are ASCII); path is a program, file, folder or URL.
+function normalizeApp(a) {
+  if (!a || typeof a !== 'object') return null;
+  const str = (v, n) => (typeof v === 'string' ? v.trim().slice(0, n) : '');
+  const name = str(a.name, 15), path = str(a.path, 512), args = str(a.args, 512);
+  return name && path ? { name, path, args } : null;
+}
 
 // Turns anything (file contents, a POST body) into a complete, valid config.
 function normalize(input, base = DEFAULTS) {
@@ -46,6 +59,7 @@ function normalize(input, base = DEFAULTS) {
     limits: typeof i.limits === 'boolean' ? i.limits : base.limits,
     sessionBudget: clampInt(i.sessionBudget, 0, 1e12, base.sessionBudget),
     plan: typeof i.plan === 'string' ? i.plan.slice(0, 15) : base.plan,
+    apps: Array.isArray(i.apps) ? i.apps.map(normalizeApp).filter(Boolean).slice(0, MAX_APPS) : base.apps,
     startup: typeof i.startup === 'boolean' ? i.startup : base.startup,
     board: {
       brightness: clampInt(b.brightness, 5, 255, bb.brightness),
@@ -56,6 +70,7 @@ function normalize(input, base = DEFAULTS) {
       cycle: clampInt(b.cycle, 0, 3600, bb.cycle),
       fx: ['none', 'wipe', 'fade'].includes(b.fx) ? b.fx : bb.fx,
       dim: clampInt(b.dim, 0, 3600, bb.dim),
+      clock: ['digital', 'analog'].includes(b.clock) ? b.clock : bb.clock,
     },
   };
 }
@@ -75,4 +90,4 @@ function save(cfg) {
   fs.renameSync(tmp, FILE);
 }
 
-module.exports = { APP_DIR, FILE, DEFAULTS, normalize, load, save };
+module.exports = { APP_DIR, FILE, DEFAULTS, MAX_APPS, normalize, load, save };

@@ -2,7 +2,13 @@
 // ships no extra binaries. Talks over the helper's stdin/stdout, one line per message:
 //   node -> helper:  status|<#hex colour>|<tooltip>|<menu status line>
 //                    startup|0 or 1
+//                    front|<process name>,<process name>...   (just before launching an app)
 //   helper -> node:  open | reconnect | startup | quit
+//                    log|<text>
+//
+// "front" exists because Windows won't let a background process put another app's window
+// in front: a launched app opens behind, or an already running one doesn't come up. The
+// helper watches for that app's window and raises it (see Fg below).
 // The helper exits when its stdin closes, so it never outlives the companion.
 
 const { spawn } = require('node:child_process');
@@ -15,6 +21,83 @@ Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
 function Send($s) { [Console]::Out.WriteLine($s); [Console]::Out.Flush() }
+
+Add-Type @'
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+
+public static class Fg {
+  delegate bool EnumProc(IntPtr h, IntPtr l);
+  [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc cb, IntPtr l);
+  [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+  [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
+  [DllImport("user32.dll")] static extern int GetWindowTextLength(IntPtr h);
+  [DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr h, uint cmd);
+  [DllImport("user32.dll")] static extern bool IsIconic(IntPtr h);
+  [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr h, int cmd);
+  [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr h);
+  [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] static extern void mouse_event(uint f, int x, int y, uint d, UIntPtr e);
+  [DllImport("user32.dll")] static extern void keybd_event(byte vk, byte scan, uint f, UIntPtr e);
+
+  // Visible, titled, unowned top-level windows of these processes, front-most first.
+  public static long[] Windows(uint[] pids) {
+    var want = new HashSet<uint>(pids);
+    var found = new List<long>();
+    EnumWindows((h, l) => {
+      uint pid;
+      GetWindowThreadProcessId(h, out pid);
+      if (want.Contains(pid) && IsWindowVisible(h) && GetWindowTextLength(h) > 0 &&
+          GetWindow(h, 4 /* GW_OWNER */) == IntPtr.Zero)
+        found.Add(h.ToInt64());
+      return true;
+    }, IntPtr.Zero);
+    return found.ToArray();
+  }
+
+  static bool Try(IntPtr h) { return SetForegroundWindow(h) && GetForegroundWindow() == h; }
+
+  // Windows hands the foreground only to the process that made the last input, so if
+  // asking plainly fails, make an input: a zero-distance mouse move first (invisible),
+  // a lone Alt tap last (it can show menu or ribbon key hints in the app that had focus).
+  public static string Raise(long handle) {
+    var h = new IntPtr(handle);
+    if (IsIconic(h)) ShowWindow(h, 9 /* SW_RESTORE */);
+    if (Try(h)) return "ok";
+    mouse_event(1 /* MOUSEEVENTF_MOVE */, 0, 0, 0, UIntPtr.Zero);
+    if (Try(h)) return "ok after input";
+    keybd_event(0x12, 0, 0, UIntPtr.Zero);
+    keybd_event(0x12, 0, 2 /* KEYUP */, UIntPtr.Zero);
+    return Try(h) ? "ok after alt" : "refused";
+  }
+}
+'@
+
+function ProcIds($names) {
+  [uint32[]]@(Get-Process -Name $names -ErrorAction SilentlyContinue | ForEach-Object { $_.Id })
+}
+
+# Apps waiting to be raised: their process names, the windows they had at launch, when.
+$script:fronts = New-Object System.Collections.ArrayList
+
+function TickFronts {
+  foreach ($f in @($script:fronts)) {
+    $wins = [Fg]::Windows((ProcIds $f.names))
+    $age = ([DateTime]::UtcNow - $f.at).TotalMilliseconds
+    $new = @($wins | Where-Object { $_ -notin $f.before })
+    $pick = $null
+    if ($new.Count) { $pick = $new[0] }                                  # it opened a window
+    elseif ($f.before.Count -and $wins.Count -and $age -gt 1500) { $pick = $wins[0] }  # was running
+    if ($pick) {
+      Send ("log|front " + ($f.names -join ',') + ": " + [Fg]::Raise($pick))
+      $script:fronts.Remove($f)
+    } elseif ($age -gt 20000) {
+      Send ("log|front " + ($f.names -join ',') + ": no window appeared")
+      $script:fronts.Remove($f)
+    }
+  }
+}
 
 function MakeIcon($hex) {
   $bmp = New-Object System.Drawing.Bitmap 32, 32
@@ -60,6 +143,7 @@ $script:task = $reader.ReadLineAsync()
 $timer = New-Object System.Windows.Forms.Timer
 $timer.Interval = 150
 $timer.add_Tick({
+  if ($script:fronts.Count) { try { TickFronts } catch { Send ("log|front failed: " + $_.Exception.Message); $script:fronts.Clear() } }
   while ($script:task.IsCompleted) {
     $line = $null
     if (-not $script:task.IsFaulted) { $line = $script:task.Result }
@@ -74,6 +158,11 @@ $timer.add_Tick({
       $statusItem.Text = $p[3]
     } elseif ($p[0] -eq 'startup') {
       $startup.Checked = ($p[1] -eq '1')
+    } elseif ($p[0] -eq 'front' -and $p.Length -ge 2) {
+      $names = @($p[1].Split(',') | Where-Object { $_ })
+      if ($names.Count) {
+        [void]$script:fronts.Add(@{ names = $names; at = [DateTime]::UtcNow; before = [Fg]::Windows((ProcIds $names)) })
+      }
     }
     $script:task = $reader.ReadLineAsync()
   }
@@ -106,7 +195,8 @@ class Tray extends EventEmitter {
       while ((i = buf.indexOf('\n')) >= 0) {
         const cmd = buf.slice(0, i).trim();
         buf = buf.slice(i + 1);
-        if (cmd) this.emit('command', cmd);
+        if (cmd.startsWith('log|')) log('tray:', cmd.slice(4));
+        else if (cmd) this.emit('command', cmd);
       }
     });
     let err = '';
@@ -139,6 +229,12 @@ class Tray extends EventEmitter {
   setStartup(on) {
     this.last.startup = `startup|${on ? 1 : 0}`;
     this.write(this.last.startup);
+  }
+
+  // Raise the next window of any of these processes (names without .exe).
+  front(names) {
+    const clean = names.map((n) => String(n).replace(/[^\w.-]/g, '')).filter(Boolean);
+    if (clean.length) this.write(`front|${[...new Set(clean)].join(',')}`);
   }
 
   stop() {

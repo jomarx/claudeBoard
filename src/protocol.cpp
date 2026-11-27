@@ -12,17 +12,18 @@ void protocolBegin() {
 }
 
 void protocolSendHello() {
-  Serial.printf("{\"type\":\"hello\",\"fw\":\"%s\",\"w\":240,\"h\":320,\"cfg\":true}\n", FW_VERSION);
+  Serial.printf("{\"type\":\"hello\",\"fw\":\"%s\",\"w\":240,\"h\":320,\"cfg\":true,\"apps\":true}\n", FW_VERSION);
 }
 
 static const char *FX_NAMES[] = {"none", "wipe", "fade"};
+static const char *CLOCK_NAMES[] = {"digital", "analog"};
 
 void protocolSendSettings() {
   const Settings &s = g_settings;
   Serial.printf("{\"type\":\"cfg\",\"brightness\":%u,\"alert1\":%u,\"alert2\":%u,\"h24\":%s,"
-                "\"rot\":%u,\"cycle\":%u,\"fx\":\"%s\",\"dim\":%u}\n",
+                "\"rot\":%u,\"cycle\":%u,\"fx\":\"%s\",\"dim\":%u,\"clock\":\"%s\"}\n",
                 s.brightness, s.alert1, s.alert2, s.h24 ? "true" : "false",
-                s.rot, s.cycle, FX_NAMES[(int)s.fx], s.dim);
+                s.rot, s.cycle, FX_NAMES[(int)s.fx], s.dim, CLOCK_NAMES[(int)s.clock]);
 }
 
 void protocolSendEvent(const char *name, int value) {
@@ -100,6 +101,11 @@ static void applyConfig(JsonObjectConst d) {
     for (int i = 0; i < 3; i++)
       if (!strcmp(fx, FX_NAMES[i])) g_settings.fx = (Fx)i;
   }
+  const char *clock = d["clock"];
+  if (clock) {
+    for (int i = 0; i < 2; i++)
+      if (!strcmp(clock, CLOCK_NAMES[i])) g_settings.clock = (ClockStyle)i;
+  }
 }
 
 static void handleLine(const char *line, Requests &req) {
@@ -125,7 +131,26 @@ static void handleLine(const char *line, Requests &req) {
     return;
   }
   if (!strcmp(type, "screen")) {
-    req.screen = doc["n"] | 0;
+    if (doc["step"].is<int>()) req.step = constrain(doc["step"].as<int>(), -1, 1);
+    else req.screen = doc["n"] | 0;
+    return;
+  }
+  if (!strcmp(type, "apps")) {
+    JsonArrayConst list = doc["list"];
+    uint8_t n = 0;
+    for (JsonVariantConst v : list) {
+      if (n >= MAX_APPS) break;
+      const char *name = v | "";
+      if (!*name) continue;
+      // The board fonts are ASCII only; anything else shows as '?'.
+      size_t i = 0;
+      for (; name[i] && i < sizeof g_apps[n].name - 1; i++)
+        g_apps[n].name[i] = (name[i] >= 32 && name[i] < 127) ? name[i] : '?';
+      g_apps[n].name[i] = 0;
+      n++;
+    }
+    g_appCount = n;
+    req.apps = true;
     return;
   }
   if (!strcmp(type, "preview")) {

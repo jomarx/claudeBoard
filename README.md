@@ -40,7 +40,7 @@ puts an icon in the tray (green = live, amber = waiting or a limits error, grey 
 opens the settings page the first time. Starting it again while it runs just opens the page.
 The tray menu has Open settings, Reconnect, Start with Windows and Quit.
 
-Settings page: serial port, update interval, orientation (portrait or landscape, each normal or flipped), brightness,
+Settings page: serial port, update interval, orientation (portrait or landscape, each normal or flipped), clock style, brightness,
 dim timeout, 12/24h clock, automatic screen change every N seconds, transition (none / wipe /
 fade), alert thresholds, real limits on/off, session budget, plan label, start with Windows.
 Changes apply to the board right away and are saved in `%APPDATA%\claudeBoard\config.json`;
@@ -94,17 +94,30 @@ alert screen and the "you're back" screen without waiting for real usage.
 
 ## Controls
 
+Five screens: **Main** (gauges), **Today** (daily detail), **Clock** (digital or analog, picked
+under "Clock style" on the settings page), **Calendar** (this month, today
+circled) and **Apps** (a launcher). Each has a bar along the bottom: previous, next, the page
+dots, and play/pause for the automatic screen change.
+
 | Input | Normal screens | Alert screen |
 |---|---|---|
-| Tap / BOOT button | next screen | tap a button / BOOT dismisses |
+| Tap the bar | previous / next screen, play / pause | - |
+| Tap elsewhere | Main, Today: next screen. Calendar: month title left / middle / right = previous month / this month / next month. Apps: opens that tile on the PC | tap a button |
+| BOOT button | next screen | dismiss |
 | Long press (touch or BOOT) | cycle brightness | - |
+
+The launcher's tiles are set on the settings page (Launcher section, up to 8): a name for the
+board and what to open, which is a program (`.exe`, with optional arguments), or a file,
+folder or URL. The board only gets the names; tapping a tile asks the companion to open it,
+so the PC side decides what runs. Each row has a Test button.
 
 Screen dims after 2 minutes idle; the first touch only wakes it. Alerts fire at 80%, 90%
 and 100% of the 5-hour limit. A higher threshold breaks through a snooze. When a window that
 hit 100% resets, a "You're back" screen shows.
 
 With "change screen every N seconds" set, the board pages by itself after N seconds without a
-touch; it never pages away from an alert. The transition (none, wipe, fade) applies to every
+touch; it never pages away from an alert. The play/pause button stops and restarts that until
+the setting changes or the board restarts; with the setting at 0, play pages every 10 seconds. The transition (none, wipe, fade) applies to every
 page change, tapped or automatic; alerts always appear at once.
 
 All of these are set on the companion's settings page and saved on the board, so it keeps them

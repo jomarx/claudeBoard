@@ -1,7 +1,7 @@
 #pragma once
 #include <Arduino.h>
 
-#define FW_VERSION "0.2.0"
+#define FW_VERSION "0.3.0"
 
 // How long without a usage frame before the status dot changes.
 #define STALE_AFTER_MS   (120UL * 1000UL)
@@ -33,6 +33,7 @@ struct UsageData {
 };
 
 enum class Fx : uint8_t { None = 0, Wipe = 1, Fade = 2 };
+enum class ClockStyle : uint8_t { Digital = 0, Analog = 1 };
 
 // Saved in NVS (settings.cpp); the companion can change every field with a cfg frame.
 struct Settings {
@@ -43,11 +44,13 @@ struct Settings {
   uint8_t rot = 0;          // display rotation, 0 portrait, 1 landscape, 2/3 flipped
   uint16_t cycle = 0;       // seconds between automatic page changes, 0 = off
   Fx fx = Fx::None;         // effect when the page changes
+  ClockStyle clock = ClockStyle::Digital;   // the clock screen's face
   uint16_t dim = 120;       // seconds idle before dimming, 0 = never
 
   bool operator==(const Settings &o) const {
     return brightness == o.brightness && alert1 == o.alert1 && alert2 == o.alert2 && h24 == o.h24 &&
-           rot == o.rot && cycle == o.cycle && fx == o.fx && dim == o.dim;
+           rot == o.rot && cycle == o.cycle && fx == o.fx && dim == o.dim &&
+           clock == o.clock;
   }
   bool operator!=(const Settings &o) const { return !(*this == o); }
 };
@@ -67,3 +70,13 @@ extern UsageData g_usage;
 extern Settings g_settings;
 extern Clock g_clock;
 extern uint32_t g_lastFrameMs;   // millis() of the last usage frame, 0 = never
+
+// Launcher tiles, sent by the companion in an "apps" frame. Only the names live on the
+// board; tapping tile i sends a "launch" event with value i and the PC opens it.
+#define MAX_APPS 8
+struct AppEntry {
+  char name[16];
+};
+
+extern AppEntry g_apps[MAX_APPS];
+extern uint8_t g_appCount;

@@ -75,9 +75,13 @@ flags until the setting is changed on the page (`effective()` in `main.js`).
 
 - Display, screens, alerts, and the companion with `--limits` all work. The board is now on COM12
   (CH340, 1a86:7523); COM3 is an unrelated CH9102 with the same vendor id, so auto-detect matches the PID.
-- Firmware 0.2.0: settings saved in NVS (`src/settings.cpp`), rotation 0-3 (portrait/landscape, each flippable; landscape has its own Main/Today layouts in `ui.cpp`, touch remapped in `input.cpp`),
+- Firmware 0.3.0: screens Main/Today/Clock/Calendar/Launcher (clock redraws every second while shown;
+  style is the `clock` board setting, big digits are TFT_eSPI font 8), each with a nav bar (prev/next/play-pause;
+  tap targets come from `uiHitTest` in `ui.cpp`, actions in `handleTap` in `main.cpp`); settings saved in NVS (`src/settings.cpp`), rotation 0-3 (portrait/landscape, each flippable; landscape has its own Main/Today layouts in `ui.cpp`, touch remapped in `input.cpp`),
   auto screen cycle, wipe/fade transitions, configurable dim, `preview` frames.
-- Companion 0.2.0 (`companion/src/`, CommonJS so pkg can bundle it): tray icon via a hidden PowerShell
+- Launcher: tiles live in the companion config (`apps`); the board gets names only (`apps` frame) and
+  sends a `launch` event, which `launcher.js` opens (`.exe` spawned directly, anything else via the shell).
+- Companion 0.3.0 (`companion/src/`, CommonJS so pkg can bundle it): tray icon via a hidden PowerShell
   NotifyIcon helper, settings page on 127.0.0.1:47820 (Host check + JSON-only POST), config in
   `%APPDATA%\claudeBoard`, single instance via the UI port. `npm run build:exe` -> `dist/claudeBoard.exe`.
 - `--limits` reads the `claude` CLI sign-in from `~/.claude/.credentials.json` and calls the undocumented
@@ -91,7 +95,8 @@ flags until the setting is changed on the page (`effective()` in `main.js`).
 
 ## Next steps
 
-1. Check the transitions, landscape layouts and the flipped/landscape taps by eye; tune the wipe strip size/delay in
+1. Check the transitions, landscape layouts, nav bar, calendar and launcher, and the flipped/landscape
+   taps by eye; tune the wipe strip size/delay in
    `uiRender` (`src/ui.cpp`) if it looks slow or tears.
 2. Remove `-DBOOT_SELFTEST=1` (red/green/blue flash at boot) and `-DTOUCH_DEBUG=1` once happy.
 3. Exe icon/version resources (not set yet; editing resources after pkg can break its payload).

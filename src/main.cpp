@@ -13,6 +13,10 @@ UsageData g_usage;
 Settings g_settings;
 Clock g_clock;
 uint32_t g_lastFrameMs = 0;
+AppEntry g_apps[MAX_APPS];
+uint8_t g_appCount = 0;
+UiState g_ui;
+static uint32_t pressedAppMs = 0;   // when a launcher tile was tapped, to un-highlight it
 
 static View page = View::Main;      // the pageable screen underneath any overlay
 static View shown = View::Main;     // what is on the glass right now
@@ -123,18 +127,56 @@ static void cycleBrightness() {
 
 // ---------- input ----------
 
-static void nextPage(bool report = true) {
-  page = (View)(((int)page + 1) % (int)View::PageCount);
+static void goToPage(View v, bool report = true) {
+  if (v != page) g_ui.monthOffset = 0;   // the calendar reopens on this month
+  page = v;
   lastPageMs = millis();
   showPage();
   if (report) protocolSendEvent("screen", (int)page);
 }
 
+static void stepPage(int dir, bool report = true) {
+  const int n = (int)View::PageCount;
+  goToPage((View)((((int)page + dir) % n + n) % n), report);
+}
+
+// Seconds between automatic page changes. Play with the setting at 0 still pages.
+static uint32_t cycleSeconds() { return g_settings.cycle ? g_settings.cycle : 10; }
+
+static void togglePlay() {
+  g_ui.playing = !g_ui.playing;
+  lastPageMs = millis();
+  dirty = true;
+  protocolSendEvent("play", g_ui.playing ? 1 : 0);
+}
+
 // Auto-cycle: only between normal pages, never away from an alert.
 static void tickCycle() {
-  if (g_settings.cycle == 0 || shown != page) return;
+  if (!g_ui.playing || shown != page) return;
   uint32_t since = millis() - max(lastPageMs, lastActivityMs);
-  if (since >= g_settings.cycle * 1000UL) nextPage(false);
+  if (since >= cycleSeconds() * 1000UL) stepPage(1, false);
+}
+
+static void handleTap(int x, int y) {
+  HitResult h = uiHitTest(page, x, y);
+  switch (h.kind) {
+    case Hit::Prev: stepPage(-1); break;
+    case Hit::Next: stepPage(1); break;
+    case Hit::PlayPause: togglePlay(); break;
+    case Hit::MonthPrev: g_ui.monthOffset--; dirty = true; break;
+    case Hit::MonthNext: g_ui.monthOffset++; dirty = true; break;
+    case Hit::MonthToday: if (g_ui.monthOffset) { g_ui.monthOffset = 0; dirty = true; } break;
+    case Hit::App:
+      g_ui.pressedApp = h.index;
+      pressedAppMs = millis();
+      dirty = true;
+      protocolSendEvent("launch", h.index);
+      break;
+    default:
+      // Off any button: the gauge screens keep "tap anywhere for the next page".
+      if (page == View::Main || page == View::Today) stepPage(1);
+      break;
+  }
 }
 
 static void handleInput(const InputEvent &ev) {
@@ -146,13 +188,13 @@ static void handleInput(const InputEvent &ev) {
   switch (shown) {
     case View::Alert:
       if (ev.kind == InputKind::Tap) {
-        int b = uiAlertButtonAt(ev.x, ev.y);
-        if (b == 1) {
+        Hit b = uiHitTest(View::Alert, ev.x, ev.y).kind;
+        if (b == Hit::Snooze) {
           snoozed = true;
           snoozeUntilMs = millis() + 30UL * 60UL * 1000UL;
           protocolSendEvent("snooze", alert.pct);
           showPage();
-        } else if (b == 2) {
+        } else if (b == Hit::Dismiss) {
           protocolSendEvent("dismiss", alert.pct);
           showPage();
         }
@@ -168,7 +210,8 @@ static void handleInput(const InputEvent &ev) {
       break;
   }
 
-  if (ev.kind == InputKind::Tap || ev.kind == InputKind::ButtonShort) nextPage();
+  if (ev.kind == InputKind::Tap) handleTap(ev.x, ev.y);
+  else if (ev.kind == InputKind::ButtonShort) stepPage(1);
   else if (ev.kind == InputKind::LongPress || ev.kind == InputKind::ButtonLong) cycleBrightness();
 }
 
@@ -183,6 +226,7 @@ void setup() {
 
   protocolBegin();
   settingsLoad();
+  g_ui.playing = g_settings.cycle > 0;
   uiBegin();
   inputBegin();
   lastActivityMs = millis();
@@ -193,9 +237,10 @@ void setup() {
   protocolSendSettings();
 }
 
-// Things on screen that change with time alone: the minute, and live/stale/offline.
+// Things on screen that change with time alone: the minute (the second on the clock
+// screen), and live/stale/offline.
 static uint32_t timeSignature() {
-  uint32_t sig = g_clock.synced() ? g_clock.now() / 60 : 0;
+  uint32_t sig = !g_clock.synced() ? 0 : shown == View::Clock ? g_clock.now() : g_clock.now() / 60;
   if (g_lastFrameMs) {
     uint32_t age = millis() - g_lastFrameMs;
     sig = sig * 4 + (age < STALE_AFTER_MS ? 1 : age < OFFLINE_AFTER_MS ? 2 : 3);
@@ -212,7 +257,11 @@ static void applySettings(const Settings &before) {
     lastActivityMs = millis();
     uiSetBrightness(s.brightness);
   }
-  if (s.cycle != before.cycle) lastPageMs = millis();
+  if (s.cycle != before.cycle) {
+    // A new interval from the page starts it (or stops it, at 0); the button overrides later.
+    g_ui.playing = s.cycle > 0;
+    lastPageMs = millis();
+  }
   settingsSave();
 }
 
@@ -228,10 +277,19 @@ void loop() {
     dirty = true;
   }
   if (req.screen >= 0 && req.screen < (int)View::PageCount) {
-    page = (View)req.screen;
-    lastPageMs = millis();
     wake();
-    showPage();
+    goToPage((View)req.screen, false);
+  } else if (req.step) {
+    wake();
+    stepPage(req.step);
+  }
+  if (req.apps) {
+    if (g_ui.pressedApp >= g_appCount) g_ui.pressedApp = -1;
+    if (page == View::Launcher) dirty = true;
+  }
+  if (g_ui.pressedApp >= 0 && millis() - pressedAppMs > 400) {
+    g_ui.pressedApp = -1;
+    dirty = true;
   }
   if (req.preview == 0) {
     alert.pct = g_usage.sessionPct >= 0 ? g_usage.sessionPct : g_settings.alert2;

@@ -49,6 +49,15 @@
   pre { background: var(--bg); border-radius: 8px; padding: 10px; margin: 0; max-height: 220px; overflow: auto;
     font: 12px/1.5 ui-monospace, Consolas, monospace; color: var(--muted); white-space: pre-wrap; }
   .files { color: var(--dim); font-size: 12px; margin-top: 8px; overflow-wrap: anywhere; }
+  .lead { color: var(--dim); font-size: 12px; margin: -4px 0 10px; }
+  .app-row { display: grid; grid-template-columns: 130px 1fr 150px auto; gap: 8px; align-items: center; padding: 6px 0; }
+  .app-row + .app-row { border-top: 1px solid var(--line); }
+  .app-row input { width: 100%; }
+  .app-row .btns { display: flex; gap: 4px; }
+  .app-row .btns button { padding: 6px 9px; }
+  .app-row.new { border-top: 1px solid var(--line); margin-top: 4px; padding-top: 12px; }
+  button.act:disabled { opacity: .4; cursor: default; }
+  .empty { color: var(--dim); padding: 6px 0; }
 </style>
 </head>
 <body>
@@ -117,7 +126,8 @@
     <div class="row">
       <label for="cycle">Change screen every</label>
       <div class="inline"><input id="cycle" type="number" min="0" max="3600" data-board="cycle"> seconds</div>
-      <div class="hint">0 = only when you tap. Alerts are never cycled away.</div>
+      <div class="hint">0 = only when you tap. The play/pause button on the board starts and stops it
+        (every 10 s when this is 0). Alerts are never cycled away.</div>
     </div>
     <div class="row">
       <label>Transition</label>
@@ -128,12 +138,34 @@
       </div>
     </div>
     <div class="row">
+      <label>Clock style</label>
+      <div class="seg" data-board="clock">
+        <button type="button" data-v="digital">Digital</button>
+        <button type="button" data-v="analog">Analog</button>
+      </div>
+      <div class="hint">The clock screen; 12/24-hour follows the Clock setting above.</div>
+    </div>
+    <div class="row">
       <label>Try it</label>
       <div class="inline">
+        <button class="act" data-action="prev" type="button">Previous screen</button>
         <button class="act" data-action="next" type="button">Next screen</button>
         <button class="act" data-action="alert" type="button">Preview alert</button>
         <button class="act" data-action="back" type="button">Preview "you're back"</button>
       </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Launcher</h2>
+    <p class="lead">Tiles on the board's Apps screen, up to 8. Tapping one opens it on this PC: a program
+      (.exe, with optional arguments), or a file, folder or URL (arguments don't apply to those).</p>
+    <div id="apps"></div>
+    <div class="app-row new">
+      <input type="text" id="app-name" maxlength="15" placeholder="Name on the board">
+      <input type="text" id="app-path" maxlength="512" placeholder="C:\Program Files\...\app.exe, a file, folder or https://...">
+      <input type="text" id="app-args" maxlength="512" placeholder="Arguments">
+      <div class="btns"><button class="act" id="app-add" type="button">Add</button></div>
     </div>
   </section>
 
@@ -253,6 +285,7 @@ function render(s) {
       }
     }
   }
+  renderApps(c.apps);
   $('brightness-v').textContent = $('brightness').value;
   $('startup').checked = s.startup;
   if (!$('port').matches(':focus')) $('port').value = c.port;
@@ -261,6 +294,88 @@ function render(s) {
   log.textContent = s.log.join('\n');
   if (atBottom) log.scrollTop = log.scrollHeight;
 }
+
+// ---------- launcher apps ----------
+
+const MAX_APPS = 8;
+let appsShown = null;   // JSON of the list the rows were built from
+
+function textInput(value, placeholder, max) {
+  const el = document.createElement('input');
+  el.type = 'text'; el.value = value; el.placeholder = placeholder; el.maxLength = max;
+  return el;
+}
+
+function actButton(label, title, onClick, disabled = false) {
+  const b = document.createElement('button');
+  b.type = 'button'; b.className = 'act'; b.textContent = label; b.title = title; b.disabled = disabled;
+  b.addEventListener('click', onClick);
+  return b;
+}
+
+// The list as the rows show it right now, edits included.
+function appsFromRows() {
+  return [...$('apps').querySelectorAll('.app-row')].map((r) => {
+    const [name, path, args] = r.querySelectorAll('input');
+    return { name: name.value.trim(), path: path.value.trim(), args: args.value.trim() };
+  });
+}
+
+async function saveApps(list) {
+  if (list.some((a) => !a.name || !a.path)) { alertBox('Each app needs a name and something to open.'); return; }
+  appsShown = null;   // rebuild from what the companion saved
+  await save({ apps: list });
+}
+
+function renderApps(list) {
+  const box = $('apps');
+  $('app-add').disabled = list.length >= MAX_APPS;
+  // Don't rebuild the rows under the cursor; the next poll catches up.
+  if (box.contains(document.activeElement)) return;
+  const key = JSON.stringify(list);
+  if (key === appsShown) return;
+  appsShown = key;
+  box.replaceChildren();
+  if (!list.length) {
+    const p = document.createElement('div');
+    p.className = 'empty'; p.textContent = 'No apps yet. Add one below.';
+    box.append(p);
+    return;
+  }
+  list.forEach((a, i) => {
+    const row = document.createElement('div');
+    row.className = 'app-row';
+    const inputs = [textInput(a.name, 'Name', 15), textInput(a.path, 'Path or URL', 512), textInput(a.args, 'Arguments', 512)];
+    for (const el of inputs) el.addEventListener('change', () => saveApps(appsFromRows()));
+    const move = (d) => () => {
+      const l = appsFromRows();
+      [l[i], l[i + d]] = [l[i + d], l[i]];
+      saveApps(l);
+    };
+    const btns = document.createElement('div');
+    btns.className = 'btns';
+    btns.append(
+      actButton('↑', 'Move up', move(-1), i === 0),
+      actButton('↓', 'Move down', move(1), i === list.length - 1),
+      actButton('Test', 'Open it now on this PC', async () => {
+        try { render(await api('/api/action', { action: 'launch', index: i })); }
+        catch (e) { alertBox(e.message); }
+      }),
+      actButton('Remove', 'Remove this tile', () => saveApps(appsFromRows().filter((_, j) => j !== i))),
+    );
+    row.append(...inputs, btns);
+    box.append(row);
+  });
+}
+
+$('app-add').addEventListener('click', () => {
+  const a = { name: $('app-name').value.trim(), path: $('app-path').value.trim(), args: $('app-args').value.trim() };
+  if (!a.name || !a.path) { alertBox('Give the app a name and something to open.'); return; }
+  const list = state ? state.config.apps : [];
+  if (list.length >= MAX_APPS) return;
+  for (const id of ['app-name', 'app-path', 'app-args']) $(id).value = '';
+  saveApps([...list, a]);
+});
 
 async function loadPorts() {
   const ports = await api('/api/ports');

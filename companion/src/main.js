@@ -9,6 +9,7 @@ const { Board, listPorts } = require('./board');
 const { Tray } = require('./tray');
 const { createServer } = require('./server');
 const startup = require('./startup');
+const { launch, frontNames } = require('./launcher');
 const VERSION = require('../package.json').version;
 
 // ---------- command line ----------
@@ -89,10 +90,17 @@ async function run() {
   const url = `http://127.0.0.1:${UI_PORT}/`;
   const board = new Board(effective, { verbose: VERBOSE });
   const tray = NO_TRAY ? null : new Tray();
-  let pushTimer = null, lastFrame = null, lastFrameAt = 0, page = 0;
+  // Watch for the app's window before starting it, so Windows' focus rules don't leave it behind.
+  const open = (a) => { if (tray) tray.front(frontNames(a)); launch(a); };
+  let pushTimer = null, lastFrame = null, lastFrameAt = 0;
   let startupOn = false;
 
   const sendBoardCfg = () => board.send({ type: 'cfg', ...effective().board });
+  // The board only gets the tile names; paths stay here. Its fonts are ASCII only.
+  const sendApps = () => board.send({
+    type: 'apps',
+    list: effective().apps.map((a) => a.name.replace(/[^\x20-\x7e]/g, '?')),
+  });
 
   const push = async () => {
     const cfg = effective();
@@ -118,11 +126,16 @@ async function run() {
 
   board.on('ready', () => {
     sendBoardCfg();
+    sendApps();
     push();
     schedule();
   });
   board.on('event', (m) => {
-    if (m.name === 'screen') page = m.value;
+    if (m.name === 'launch') {
+      const a = effective().apps[m.value];
+      if (a) open(a);
+      else log(`board asked for app ${m.value}, which isn't set`);
+    }
     if (m.name === 'brightness' && Number.isFinite(m.value)) {
       // Long press on the board changed brightness: remember it.
       delete ovBoard.brightness;
@@ -184,6 +197,7 @@ async function run() {
 
       if (after.port !== before.port) { log(`port set to ${after.port}`); board.reconnect(); }
       if (!sameJSON(after.board, before.board)) sendBoardCfg();
+      if (!sameJSON(after.apps, before.apps)) sendApps();
       if (after.interval !== before.interval) schedule();
       if (after.limits !== before.limits) await refreshLimits(after, true);
       if (after.limits !== before.limits || after.plan !== before.plan || after.sessionBudget !== before.sessionBudget) push();
@@ -194,9 +208,17 @@ async function run() {
       updateTray();
       return app.state();
     },
-    async action(name) {
+    async action(name, body = {}) {
       switch (name) {
-        case 'next': page = (page + 1) % 2; board.send({ type: 'screen', n: page }); break;
+        // A relative step lets the board wrap around however many screens it has.
+        case 'next': board.send({ type: 'screen', step: 1 }); break;
+        case 'prev': board.send({ type: 'screen', step: -1 }); break;
+        case 'launch': {
+          const a = effective().apps[Number(body.index)];
+          if (!a) throw new Error('no such app');
+          open(a);
+          break;
+        }
         case 'alert': board.send({ type: 'preview', view: 'alert' }); break;
         case 'back': board.send({ type: 'preview', view: 'back' }); break;
         case 'reconnect': board.reconnect(); break;

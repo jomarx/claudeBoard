@@ -40,6 +40,13 @@ struct G {
   void rrect(int x, int y, int w, int h, int r, uint16_t c) { spr.fillRoundRect(x, y - y0, w, h, r, c); }
   void rframe(int x, int y, int w, int h, int r, uint16_t c) { spr.drawRoundRect(x, y - y0, w, h, r, c); }
   void circle(int x, int y, int r, uint16_t c) { spr.fillCircle(x, y - y0, r, c); }
+  // Anti-aliased line with round ends, blended against bg.
+  void wline(float xa, float ya, float xb, float yb, float w, uint16_t c, uint16_t bg) {
+    spr.drawWideLine(xa, ya - y0, xb, yb - y0, w, c, bg);
+  }
+  void tri(int x0, int y0_, int x1, int y1, int x2, int y2, uint16_t c) {
+    spr.fillTriangle(x0, y0_ - y0, x1, y1 - y0, x2, y2 - y0, c);
+  }
   void arc(int x, int y, int r, int ir, int a0, int a1, uint16_t fg, uint16_t bg, bool round) {
     spr.drawSmoothArc(x, y - y0, r, ir, a0, a1, fg, bg, round);
   }
@@ -134,13 +141,53 @@ static void header(const char *left, uint16_t bg) {
   g.circle(W - 12 - w - 8, 13, 3, dot);
 }
 
-static void pageDots(int active) {
-  int n = (int)View::PageCount;
-  int x = W / 2 - (n - 1) * 8;
-  for (int i = 0; i < n; i++) {
-    if (i == active) g.circle(x + i * 16, H - 12, 3, C_TEXT);
-    else g.circle(x + i * 16, H - 12, 2, C_DIM);
+// ---------- nav bar: [<] [>]  page dots  [play/pause] ----------
+//
+// Along the bottom of every pageable screen. Content must stay above navTop().
+
+static const int NAV_H = 28, NAV_BW = 44;
+static int navTop() { return H - NAV_H - 2; }       // 290 portrait, 210 landscape
+static int navPrevX() { return 8; }
+static int navNextX() { return 8 + NAV_BW + 6; }
+static int navPlayX() { return W - 8 - NAV_BW; }
+
+static void navButton(int x, uint16_t bg) {
+  g.rrect(x, navTop(), NAV_BW, NAV_H, 6, bg);
+}
+
+static void navBar(int active) {
+  const int y = navTop(), cy = y + NAV_H / 2;
+  int x = navPrevX();
+  navButton(x, C_TRACK);
+  g.tri(x + 27, cy - 7, x + 27, cy + 7, x + 16, cy, C_TEXT);           // <
+  x = navNextX();
+  navButton(x, C_TRACK);
+  g.tri(x + 17, cy - 7, x + 17, cy + 7, x + 28, cy, C_TEXT);           // >
+  x = navPlayX();
+  navButton(x, C_TRACK);
+  if (g_ui.playing) {                                                  // || = running, tap pauses
+    g.rect(x + 16, cy - 7, 4, 14, C_TEXT);
+    g.rect(x + 24, cy - 7, 4, 14, C_TEXT);
+  } else {                                                             // > = paused, tap plays
+    g.tri(x + 17, cy - 8, x + 17, cy + 8, x + 30, cy, C_GREEN);
   }
+
+  // Page dots centered in the gap between the left pair and the play button.
+  const int n = (int)View::PageCount;
+  const int mid = (navNextX() + NAV_BW + navPlayX()) / 2;
+  const int dx = mid - (n - 1) * 7;
+  for (int i = 0; i < n; i++) {
+    if (i == active) g.circle(dx + i * 14, cy, 3, C_TEXT);
+    else g.circle(dx + i * 14, cy, 2, C_DIM);
+  }
+}
+
+static Hit navHit(int x, int y) {
+  if (y < navTop() - 6) return Hit::None;          // a little slack above the buttons
+  if (x >= navPrevX() - 6 && x < navPrevX() + NAV_BW + 3) return Hit::Prev;
+  if (x >= navNextX() - 3 && x < navNextX() + NAV_BW + 6) return Hit::Next;
+  if (x >= navPlayX() - 6) return Hit::PlayPause;
+  return Hit::None;
 }
 
 static void bar(int x, int y, int w, int h, int pct, uint16_t c) {
@@ -151,17 +198,18 @@ static void bar(int x, int y, int w, int h, int pct, uint16_t c) {
 
 // ---------- screens ----------
 
-static void drawWaiting() {
+static void drawWaiting(int page) {
   g.fill(C_BG);
   header("Claude meter", C_BG);
-  int y = land ? 60 : 120;
+  int y = land ? 50 : 100;
   g.text("Waiting for", W / 2, y, 4, C_TEXT, C_BG, TC_DATUM);
   g.text("USB data", W / 2, y + 30, 4, C_TEXT, C_BG, TC_DATUM);
   g.text("Run the host script on", W / 2, y + 80, 2, C_MUTED, C_BG, TC_DATUM);
   g.text("your PC to start the feed.", W / 2, y + 98, 2, C_MUTED, C_BG, TC_DATUM);
   char v[24];
   snprintf(v, sizeof v, "fw %s", FW_VERSION);
-  g.text(v, W / 2, H - 30, 2, C_DIM, C_BG, TC_DATUM);
+  g.text(v, W / 2, navTop() - 24, 2, C_DIM, C_BG, TC_DATUM);
+  navBar(page);
 }
 
 // 270 degree gauge for the 5-hour window with the number inside.
@@ -191,7 +239,7 @@ static void gauge(int cx, int cy) {
 
 // Label and percentage on one line with a bar underneath, spanning x0..x1.
 static void limitRow(const char *label, int pct, int x0, int x1, int y) {
-  char buf[8];
+  char buf[12];
   if (pct >= 0) snprintf(buf, sizeof buf, "%d%%", pct);
   else strcpy(buf, "--");
   g.text(label, x0, y, 2, C_MUTED, C_BG);
@@ -204,7 +252,7 @@ static void drawMain() {
   g.fill(C_BG);
   header(u.plan[0] ? u.plan : "Claude", C_BG);
 
-  const int cx = W / 2, cy = 112;
+  const int cx = W / 2, cy = 104;
   gauge(cx, cy);
   char buf[24];
   if (u.sessionReset && g_clock.synced()) {
@@ -212,13 +260,13 @@ static void drawMain() {
     int32_t left = (int32_t)(u.sessionReset - g_clock.now());
     fmtDuration(d, sizeof d, left);
     snprintf(buf, sizeof buf, "resets in %s", d);
-    g.text(buf, cx, 184, 2, C_TEXT, C_BG, TC_DATUM);
+    g.text(buf, cx, 172, 2, C_TEXT, C_BG, TC_DATUM);
   }
 
-  int y = 210;
+  int y = 196;
   limitRow("Weekly, all models", u.weekPct, 12, W - 12, y);
 
-  y += 38;
+  y += 34;
   if (u.opusPct >= 0) {
     limitRow("Weekly, Opus", u.opusPct, 12, W - 12, y);
     y += 34;
@@ -233,7 +281,7 @@ static void drawMain() {
     g.text(when, W - 12, y, 2, C_TEXT, C_BG, TR_DATUM);
   }
 
-  pageDots(0);
+  navBar(0);
 }
 
 // Landscape: gauge on the left, weekly limits in a column on the right.
@@ -267,7 +315,7 @@ static void drawMainLand() {
     g.text(when, x1, y + 18, 2, C_TEXT, C_BG, TR_DATUM);
   }
 
-  pageDots(0);
+  navBar(0);
 }
 
 static void tile(int x, int y, const char *label, const char *value, const char *suffix, int w = 104) {
@@ -293,8 +341,8 @@ static void tiles(int x, int y, int w, int gap) {
   tile(x + w + gap, y + 56, "cache hit", d, nullptr, w);
 }
 
-// Tokens per local hour as 24 bars from bx; the label sits at y, the bars below it.
-static void hourly(int bx, int y, int bw, int step) {
+// Tokens per local hour as 24 bars from bx; the label sits at y, bh-tall bars below it.
+static void hourly(int bx, int y, int bw, int step, int bh) {
   const UsageData &u = g_usage;
   g.text("Tokens per hour", bx, y, 2, C_MUTED, C_BG);
   uint32_t peak = 1;
@@ -306,7 +354,7 @@ static void hourly(int bx, int y, int bw, int step) {
     gmtime_r(&t, &tm);
     curHour = tm.tm_hour;
   }
-  const int by = y + 20, bh = 48;
+  const int by = y + 20;
   for (int i = 0; i < 24; i++) {
     int h = (int)((uint64_t)u.hourly[i] * bh / peak);
     int x = bx + i * step;
@@ -330,18 +378,18 @@ static void drawToday() {
   header(date, C_BG);
 
   tiles(12, 30, 104, 8);
-  hourly(12, 146, 8, 9);
+  hourly(12, 142, 8, 9, 44);
 
-  int y = 232;
+  int y = 222;
   for (int i = 0; i < u.modelCount; i++) {
     char p[8];
     snprintf(p, sizeof p, "%u%%", u.models[i].pct);
     g.text(u.models[i].name, 12, y, 2, C_MUTED, C_BG);
     g.text(p, W - 12, y, 2, C_TEXT, C_BG, TR_DATUM);
-    y += 18;
+    y += 16;
   }
 
-  pageDots(1);
+  navBar(1);
 }
 
 // Landscape: tiles top left, model shares top right, the hourly chart across the bottom.
@@ -368,9 +416,222 @@ static void drawTodayLand() {
     y += 26;
   }
 
-  hourly(12, 144, 10, 12);
-  pageDots(1);
+  hourly(12, 140, 10, 12, 36);
+  navBar(1);
 }
+
+// ---------- clock ----------
+
+// Seconds through the minute as a bar, centered at y.
+static void secondsBar(int y, int w, int sec) {
+  const int x = (W - w) / 2;
+  g.rrect(x, y, w, 6, 3, C_TRACK);
+  int fw = w * sec / 59;
+  if (fw > 0) g.rrect(x, y, max(fw, 6), 6, 3, C_CORAL);
+}
+
+// Font 8 has only digits and ":-.", so am/pm goes in font 4 below.
+static void drawClockDigital(const struct tm &tm) {
+  int hour = tm.tm_hour;
+  const char *ampm = nullptr;
+  if (!g_settings.h24) {
+    ampm = hour < 12 ? "am" : "pm";
+    hour = hour % 12 ? hour % 12 : 12;
+  }
+  char hh[4], mm[4];
+  snprintf(hh, sizeof hh, g_settings.h24 ? "%02d" : "%d", hour);
+  snprintf(mm, sizeof mm, "%02d", tm.tm_min);
+
+  if (land) {
+    // One line, HH:MM, with the seconds bar and am/pm underneath.
+    char t[8];
+    snprintf(t, sizeof t, "%s:%s", hh, mm);
+    g.text(t, W / 2, 44, 8, C_TEXT, C_BG, TC_DATUM);
+    secondsBar(138, 220, tm.tm_sec);
+    if (ampm) g.text(ampm, W / 2, 158, 4, C_MUTED, C_BG, TC_DATUM);
+  } else {
+    // Portrait is too narrow for HH:MM at this size: hours over minutes.
+    g.text(hh, W / 2, 40, 8, C_TEXT, C_BG, TC_DATUM);
+    g.text(mm, W / 2, 128, 8, C_CORAL, C_BG, TC_DATUM);
+    secondsBar(222, 160, tm.tm_sec);
+    if (ampm) g.text(ampm, W / 2, 240, 4, C_MUTED, C_BG, TC_DATUM);
+  }
+}
+
+static void drawClockAnalog(const struct tm &tm) {
+  const int cx = W / 2, cy = land ? 116 : 152, r = land ? 88 : 100;
+  g.arc(cx, cy, r, r - 3, 0, 360, C_TRACK, C_BG, false);
+
+  // Ticks: long at the hours, dots between.
+  for (int i = 0; i < 60; i++) {
+    const float a = i * 6 * DEG_TO_RAD, sx = sinf(a), cy_ = -cosf(a);
+    if (i % 5 == 0) {
+      const float w = i % 15 == 0 ? 4 : 2.5f, in = r - (i % 15 == 0 ? 18 : 14);
+      g.wline(cx + sx * in, cy + cy_ * in, cx + sx * (r - 8), cy + cy_ * (r - 8), w, C_MUTED, C_BG);
+    } else {
+      g.circle(cx + (int)roundf(sx * (r - 9)), cy + (int)roundf(cy_ * (r - 9)), 1, C_DIM);
+    }
+  }
+
+  // Hands move smoothly: the hour hand with the minutes, the minute hand with the seconds.
+  const float sec = tm.tm_sec, min = tm.tm_min + sec / 60.0f, hr = (tm.tm_hour % 12) + min / 60.0f;
+  auto hand = [&](float turns, float len, float tail, float w, uint16_t c) {
+    const float a = turns * TWO_PI, sx = sinf(a), sy = -cosf(a);
+    g.wline(cx - sx * tail, cy - sy * tail, cx + sx * len, cy + sy * len, w, c, C_BG);
+  };
+  hand(hr / 12.0f, r * 0.50f, 0, 7, C_TEXT);
+  hand(min / 60.0f, r * 0.78f, 0, 4, C_TEXT);
+  hand(sec / 60.0f, r * 0.86f, 16, 2, C_CORAL);
+  g.circle(cx, cy, 5, C_CORAL);
+  g.circle(cx, cy, 2, C_BG);
+}
+
+static void drawClock() {
+  g.fill(C_BG);
+  if (!g_clock.synced()) {
+    header("Clock", C_BG);
+    g.text("Waiting for the time", W / 2, H / 2 - 30, 2, C_MUTED, C_BG, TC_DATUM);
+    g.text("from the PC", W / 2, H / 2 - 12, 2, C_MUTED, C_BG, TC_DATUM);
+    navBar((int)View::Clock);
+    return;
+  }
+  char date[20];
+  fmtDate(date, sizeof date, g_clock.localNow());
+  header(date, C_BG);
+  time_t t = g_clock.localNow();
+  struct tm tm;
+  gmtime_r(&t, &tm);
+  if (g_settings.clock == ClockStyle::Analog) drawClockAnalog(tm);
+  else drawClockDigital(tm);
+  navBar((int)View::Clock);
+}
+
+// ---------- calendar ----------
+
+// Days since 1970-01-01 for a civil date (H. Hinnant's algorithm), m 1..12.
+static int32_t daysFromCivil(int y, int m, int d) {
+  y -= m <= 2;
+  const int era = (y >= 0 ? y : y - 399) / 400;
+  const int yoe = y - era * 400;
+  const int doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
+  const int doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+  return era * 146097 + doe - 719468;
+}
+
+static int daysInMonth(int y, int m) {
+  static const uint8_t n[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+  bool leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
+  return m == 2 && leap ? 29 : n[m - 1];
+}
+
+// Grid geometry, shared by drawing and hit-testing. Six rows always fit above the nav bar.
+struct CalGeo { int x0, cw, titleY, labelY, gridY, rh; };
+static CalGeo calGeo() {
+  return land ? CalGeo{20, 40, 26, 56, 74, 22} : CalGeo{15, 30, 30, 64, 84, 32};
+}
+
+static void drawCalendar() {
+  g.fill(C_BG);
+  if (!g_clock.synced()) {
+    header("Calendar", C_BG);
+    g.text("Waiting for the time", W / 2, H / 2 - 30, 2, C_MUTED, C_BG, TC_DATUM);
+    g.text("from the PC", W / 2, H / 2 - 12, 2, C_MUTED, C_BG, TC_DATUM);
+    navBar((int)View::Calendar);
+    return;
+  }
+  char date[20];
+  fmtDate(date, sizeof date, g_clock.localNow());
+  header(date, C_BG);
+
+  time_t t = g_clock.localNow();
+  struct tm now;
+  gmtime_r(&t, &now);
+  int ym = (now.tm_year + 1900) * 12 + now.tm_mon + g_ui.monthOffset;
+  const int year = ym / 12, month = ym % 12 + 1;
+  const bool thisMonth = g_ui.monthOffset == 0;
+
+  static const char *mon[] = {"January", "February", "March", "April", "May", "June", "July",
+                              "August", "September", "October", "November", "December"};
+  const CalGeo c = calGeo();
+  char title[24];
+  snprintf(title, sizeof title, "%s %d", mon[month - 1], year);
+  // Amber title = not the current month; tapping its middle comes back.
+  g.text(title, W / 2, c.titleY, 4, thisMonth ? C_TEXT : C_AMBER, C_BG, TC_DATUM);
+  const int ay = c.titleY + 12;
+  g.tri(12, ay, 22, ay - 7, 22, ay + 7, C_MUTED);
+  g.tri(W - 12, ay, W - 22, ay - 7, W - 22, ay + 7, C_MUTED);
+
+  static const char *wd[] = {"S", "M", "T", "W", "T", "F", "S"};
+  for (int i = 0; i < 7; i++)
+    g.text(wd[i], c.x0 + i * c.cw + c.cw / 2, c.labelY, 2, C_DIM, C_BG, TC_DATUM);
+
+  const int first = (daysFromCivil(year, month, 1) % 7 + 11) % 7;  // 1970-01-01 was a Thursday
+  const int n = daysInMonth(year, month);
+  const int r = min(c.rh, c.cw) / 2 - 2;
+  for (int d = 1; d <= n; d++) {
+    const int cell = first + d - 1, col = cell % 7, row = cell / 7;
+    const int cx = c.x0 + col * c.cw + c.cw / 2, cy = c.gridY + row * c.rh + c.rh / 2;
+    char s[4];
+    snprintf(s, sizeof s, "%d", d);
+    if (thisMonth && d == now.tm_mday) {
+      g.circle(cx, cy, r, C_CORAL);
+      g.text(s, cx, cy, 2, C_TEXT, C_CORAL, MC_DATUM);
+    } else {
+      g.text(s, cx, cy, 2, col == 0 || col == 6 ? C_DIM : C_TEXT, C_BG, MC_DATUM);
+    }
+  }
+  navBar((int)View::Calendar);
+}
+
+// ---------- launcher ----------
+
+static void appRect(int i, int &x, int &y, int &w, int &h) {
+  const int cols = land ? 4 : 2, gap = land ? 6 : 8;
+  w = (W - 24 - (cols - 1) * gap) / cols;
+  h = land ? 80 : 56;
+  x = 12 + (i % cols) * (w + gap);
+  y = 30 + (i / cols) * (h + 6);
+}
+
+static uint16_t appColor(int i) {
+  static const uint16_t c[] = {C_CORAL, C_GREEN, rgb(55, 138, 221), C_AMBER,
+                               rgb(127, 119, 221), rgb(212, 83, 126), rgb(29, 158, 117), C_DIM};
+  return c[i % 8];
+}
+
+static void drawLauncher() {
+  g.fill(C_BG);
+  header("Apps", C_BG);
+  if (g_appCount == 0) {
+    g.text("No apps yet", W / 2, H / 2 - 50, 4, C_TEXT, C_BG, TC_DATUM);
+    g.text("Add them on the companion's", W / 2, H / 2 - 10, 2, C_MUTED, C_BG, TC_DATUM);
+    g.text("settings page.", W / 2, H / 2 + 8, 2, C_MUTED, C_BG, TC_DATUM);
+    navBar((int)View::Launcher);
+    return;
+  }
+  for (int i = 0; i < g_appCount; i++) {
+    int x, y, w, h;
+    appRect(i, x, y, w, h);
+    const bool pressed = i == g_ui.pressedApp;
+    const uint16_t bg = pressed ? C_CORAL : C_TRACK;
+    g.rrect(x, y, w, h, 6, bg);
+
+    // A coloured disc with the first letter, the name underneath.
+    const int r = land ? 16 : 12, cx = x + w / 2, cy = y + h / 2 - (land ? 10 : 9);
+    const uint16_t disc = pressed ? C_TEXT : appColor(i);
+    g.circle(cx, cy, r, disc);
+    char letter[2] = {(char)toupper((unsigned char)g_apps[i].name[0]), 0};
+    g.text(letter, cx, cy + 1, land ? 4 : 2, C_BG, disc, MC_DATUM);
+
+    char name[sizeof g_apps[i].name];
+    strlcpy(name, g_apps[i].name, sizeof name);
+    for (int len = strlen(name); len > 0 && g.width(name, 2) > w - 8;) name[--len] = 0;
+    g.text(name, cx, y + h - 19, 2, C_TEXT, bg, TC_DATUM);
+  }
+  navBar((int)View::Launcher);
+}
+
+// ---------- overlays ----------
 
 static const int BTN_H = 36;
 static int btnY() { return H - 50; }  // 270 portrait, 190 landscape
@@ -496,13 +757,16 @@ static void drawBand(View v, const AlertInfo &alert, int band) {
   switch (v) {
     case View::Alert: drawAlert(alert); break;
     case View::Back: drawBack(); break;
+    case View::Clock: drawClock(); break;
+    case View::Calendar: drawCalendar(); break;
+    case View::Launcher: drawLauncher(); break;
     case View::Today:
-      if (!g_usage.valid) drawWaiting();
+      if (!g_usage.valid) drawWaiting((int)v);
       else if (land) drawTodayLand();
       else drawToday();
       break;
     default:
-      if (!g_usage.valid) drawWaiting();
+      if (!g_usage.valid) drawWaiting((int)View::Main);
       else if (land) drawMainLand();
       else drawMain();
       break;
@@ -539,7 +803,31 @@ void uiRender(View v, const AlertInfo &alert, Fx fx) {
   if (fx == Fx::Fade) fadeBacklight(false);
 }
 
-int uiAlertButtonAt(int x, int y) {
-  if (y < btnY() - 10 || y > btnY() + BTN_H + 10) return 0;
-  return x < W / 2 ? 1 : 2;
+HitResult uiHitTest(View v, int x, int y) {
+  HitResult r;
+  if (v == View::Alert) {
+    if (y >= btnY() - 10 && y <= btnY() + BTN_H + 10) r.kind = x < W / 2 ? Hit::Snooze : Hit::Dismiss;
+    return r;
+  }
+  if (v == View::Back) return r;
+
+  r.kind = navHit(x, y);
+  if (r.kind != Hit::None) return r;
+
+  if (v == View::Calendar && g_clock.synced()) {
+    const CalGeo c = calGeo();
+    if (y >= c.titleY - 8 && y < c.labelY)
+      r.kind = x < W / 3 ? Hit::MonthPrev : x >= W * 2 / 3 ? Hit::MonthNext : Hit::MonthToday;
+  } else if (v == View::Launcher) {
+    for (int i = 0; i < g_appCount; i++) {
+      int ax, ay, aw, ah;
+      appRect(i, ax, ay, aw, ah);
+      if (x >= ax && x < ax + aw && y >= ay && y < ay + ah) {
+        r.kind = Hit::App;
+        r.index = i;
+        break;
+      }
+    }
+  }
+  return r;
 }

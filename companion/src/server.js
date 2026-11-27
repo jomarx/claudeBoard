@@ -56,7 +56,7 @@ function createServer(app, port) {
         }
         const body = await readBody(req);
         if (url.pathname === '/api/config') return json(res, 200, await app.updateConfig(body));
-        if (url.pathname === '/api/action') return json(res, 200, await app.action(String(body.action || '')));
+        if (url.pathname === '/api/action') return json(res, 200, await app.action(String(body.action || ''), body));
       }
       json(res, 404, { error: 'not found' });
     } catch (e) {

@@ -18,6 +18,7 @@ void settingsLoad() {
     s.cycle = prefs.getUShort("cycle", s.cycle);
     uint8_t fx = prefs.getUChar("fx", 0);
     s.fx = fx <= 2 ? (Fx)fx : Fx::None;
+    s.clock = prefs.getUChar("clock", 0) == 1 ? ClockStyle::Analog : ClockStyle::Digital;
     s.dim = prefs.getUShort("dim", s.dim);
     g_settings = s;
   }
@@ -37,6 +38,7 @@ void settingsSave() {
   prefs.putUChar("rot", s.rot);
   prefs.putUShort("cycle", s.cycle);
   prefs.putUChar("fx", (uint8_t)s.fx);
+  prefs.putUChar("clock", (uint8_t)s.clock);
   prefs.putUShort("dim", s.dim);
   prefs.end();
   saved = s;

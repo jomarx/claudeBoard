@@ -16,21 +16,29 @@
 //             "hourly":[0,0,...24 values],
 //             "models":[{"n":"Opus 5.5","p":68},{"n":"Sonnet 5.5","p":29}]}}
 //   {"type":"cfg","brightness":200,"alert1":80,"alert2":90,"h24":true,
-//    "rot":0,"cycle":0,"fx":"none","dim":120}          -> device answers with its cfg
+//    "rot":0,"cycle":0,"fx":"none","dim":120,"clock":"digital"}  -> device answers with its cfg
 //       rot: 0 portrait, 1 landscape, 2 portrait flipped, 3 landscape flipped
 //       (hello's w/h stay the panel's native 240x320); cycle: seconds between automatic page
-//       changes (0 off); fx: "none" | "wipe" | "fade"; dim: idle seconds (0 never).
+//       changes (0 off); fx: "none" | "wipe" | "fade"; dim: idle seconds (0 never);
+//       clock: the clock screen's face, "digital" | "analog".
 //       Every field is optional; {"type":"cfg"} alone just asks for the current values.
 //       Settings are saved on the board and survive a reboot.
-//   {"type":"screen","n":0}                            -> jump to a screen
+//   {"type":"screen","n":0}                            -> jump to a screen: 0 main, 1 today,
+//                                                         2 clock, 3 calendar, 4 launcher
+//   {"type":"screen","step":1}                         -> next (1) or previous (-1) screen
+//   {"type":"apps","list":["Outlook","Chrome"]}        -> launcher tile names, at most 8,
+//       15 printable ASCII chars each; the list replaces the previous one. The board
+//       only knows names: what a tile opens stays on the PC.
 //   {"type":"preview","view":"alert"|"back"}           -> show an overlay to test it
 //
 // Device -> host
-//   {"type":"hello","fw":"0.2.0","w":240,"h":320,"cfg":true}   (sent on boot)
+//   {"type":"hello","fw":"0.3.0","w":240,"h":320,"cfg":true,"apps":true}   (on boot)
 //   {"type":"cfg",...all settings above...}            (after hello and after every cfg)
 //   {"type":"ack","seq":1}
 //   {"type":"err","msg":"..."}
 //   {"type":"event","name":"dismiss"|"snooze"|"screen"|"brightness","value":N}
+//   {"type":"event","name":"play","value":1|0}         (auto page change started / paused)
+//   {"type":"event","name":"launch","value":i}         (launcher tile i tapped)
 //
 // Every field inside "usage" is optional; missing ones keep their last value.
 
@@ -40,6 +48,8 @@ struct Requests {
   bool config = false;    // a cfg frame arrived
   Settings before;        // settings before the first cfg frame in this poll
   int screen = -1;        // page to jump to
+  int step = 0;           // or pages to move by (+1 / -1)
+  bool apps = false;      // the launcher list changed
   int preview = -1;       // 0 = alert, 1 = back
 };
 
