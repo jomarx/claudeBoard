@@ -5,6 +5,47 @@ Firmware in `src/` (PlatformIO, Arduino, TFT_eSPI configured in `platformio.ini`
 `companion/` (Node, packaged as `claudeBoard.exe`). Board and PC talk newline-delimited JSON over USB
 serial, documented in `src/protocol.h`. Change the protocol in both places at once.
 
+## Commands
+
+There is no test suite or linter; verification is building, flashing and looking at the board.
+
+```
+pio run                                        # build default env (e32r28t, touch)
+pio run -e e32n28t                             # no-touch variant (BOOT button only)
+pio run -e e32r28t -t upload --upload-port COM12
+pio device monitor                             # 115200; shows hello/cfg/ack/event JSON
+python tools/send_fake.py COM12 [--ramp]       # drive the board without the companion
+
+cd companion
+npm install
+node companion.js --dry-run --once             # print one usage frame, no board/UI (npm run dry)
+node companion.js --port COM12 --verbose       # run from source, log all board traffic
+npm run build:exe                              # pkg -> dist/claudeBoard.exe, then GUI-subsystem patch
+```
+
+## Architecture
+
+**Firmware** (`src/`): `main.cpp` owns all state and runs a single cooperative loop. Each pass
+`protocolPoll()` fills a `Requests` struct (what frames arrived) instead of acting directly;
+`loop()` then applies settings (diffing against `req.before`), handles screen jumps/previews,
+ticks alerts, dim and auto-cycle, polls `inputPoll()`, and finally calls `uiRender()` only if
+`dirty`. Globals `g_usage`/`g_settings`/`g_clock` live in `model.h`; the board has no RTC, so
+`Clock` is resynced from `now`/`tz` in every usage frame.
+- Views (`ui.h`): `Main`/`Today` are pageable (`PageCount`); `Alert` and `Back` are overlays.
+  `main.cpp` tracks `page` (underlying page) separately from `shown` (what's on the glass), and
+  transitions (`fx`) only animate page changes, never overlays.
+- Alert logic (thresholds, snooze, new-window detection, "you're back") is all in
+  `evaluateAlerts()` in `main.cpp`; a new 5-hour window is detected from the reset time moving
+  forward or usage dropping sharply.
+- User actions on the board (page, brightness, snooze, dismiss) go back to the PC as `event`
+  frames so the companion can save them in its config.
+
+**Companion** (`companion/src/`): `main.js` wires everything. `board.js` emits `ready` on the
+board's `hello`, after which main sends `cfg` then a usage frame; the board echoes `cfg`, which
+keeps the page in sync. `usage.js` `buildFrame()` combines the log scan of
+`~/.claude/projects/**/*.jsonl` with optional `--limits` data. Saved config is overridden by CLI
+flags until the setting is changed on the page (`effective()` in `main.js`).
+
 ## Hardware facts (from https://www.lcdwiki.com/2.8inch_ESP32-32E-7789)
 
 - LCD on HSPI: SCK 14, MOSI 13, MISO 12, CS 15, DC 2, RST tied to EN, **backlight GPIO 21** (high = on).
@@ -34,7 +75,7 @@ serial, documented in `src/protocol.h`. Change the protocol in both places at on
 
 - Display, screens, alerts, and the companion with `--limits` all work. The board is now on COM12
   (CH340, 1a86:7523); COM3 is an unrelated CH9102 with the same vendor id, so auto-detect matches the PID.
-- Firmware 0.2.0: settings saved in NVS (`src/settings.cpp`), rotation 0/2 with touch flipped to match,
+- Firmware 0.2.0: settings saved in NVS (`src/settings.cpp`), rotation 0-3 (portrait/landscape, each flippable; landscape has its own Main/Today layouts in `ui.cpp`, touch remapped in `input.cpp`),
   auto screen cycle, wipe/fade transitions, configurable dim, `preview` frames.
 - Companion 0.2.0 (`companion/src/`, CommonJS so pkg can bundle it): tray icon via a hidden PowerShell
   NotifyIcon helper, settings page on 127.0.0.1:47820 (Host check + JSON-only POST), config in
@@ -50,7 +91,7 @@ serial, documented in `src/protocol.h`. Change the protocol in both places at on
 
 ## Next steps
 
-1. Check the transitions and the flipped-orientation taps by eye; tune the wipe strip size/delay in
+1. Check the transitions, landscape layouts and the flipped/landscape taps by eye; tune the wipe strip size/delay in
    `uiRender` (`src/ui.cpp`) if it looks slow or tears.
 2. Remove `-DBOOT_SELFTEST=1` (red/green/blue flash at boot) and `-DTOUCH_DEBUG=1` once happy.
 3. Exe icon/version resources (not set yet; editing resources after pkg can break its payload).
