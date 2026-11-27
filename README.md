@@ -141,8 +141,9 @@ when the PC is off. A long press still cycles brightness, and the companion save
 
 ## If something looks wrong on first boot
 
-- The board flashes red, green, blue at boot while `-DBOOT_SELFTEST` is set; remove it once you are happy.
-- Touch prints `{"type":"touch",...}` lines over serial while `-DTOUCH_DEBUG` is set, for calibration.
+- Blank or garbled screen: uncomment `-DBOOT_SELFTEST=1` in `platformio.ini`; the board then flashes red,
+  green, blue at boot, which tells a panel problem apart from a drawing one.
+- Taps off target: uncomment `-DTOUCH_DEBUG=1`; every tap then prints `{"type":"touch",...}` over serial.
 
 - Colours inverted: change `-DTFT_INVERSION_OFF` to `-DTFT_INVERSION_ON` in `platformio.ini`.
 - Red and blue swapped: change `TFT_RGB_ORDER` to `TFT_BGR`.

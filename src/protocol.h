@@ -41,7 +41,7 @@
 //   {"type":"preview","view":"alert"|"back"}           -> show an overlay to test it
 //
 // Device -> host
-//   {"type":"hello","fw":"0.3.0","w":240,"h":320,"cfg":true,"apps":true}   (on boot)
+//   {"type":"hello","fw":"0.4.0","w":240,"h":320,"cfg":true,"apps":true}   (on boot)
 //   {"type":"cfg",...all settings above...}            (after hello and after every cfg)
 //   {"type":"ack","seq":1}
 //   {"type":"err","msg":"..."}

@@ -58,8 +58,9 @@ flags until the setting is changed on the page (`effective()` in `main.js`).
 
 - `companion.js` is only the entry point; the code is in `src/`: `main.js` (CLI flags, wiring, settings
   page handlers), `usage.js` (log scan, limits, frames), `board.js` (serial, reconnect, hello handshake),
-  `config.js` (defaults + validation, `%APPDATA%\claudeBoard\config.json`), `server.js`, `tray.js`,
-  `startup.js` (HKCU Run value), `log.js`. The page is `public/index.html` (no framework).
+  `config.js` (defaults + validation, `%APPDATA%\claudeBoard\config.json`), `server.js`, `tray.js`
+  (tray icon, window raising, media session and keys), `launcher.js`, `weather.js`, `media.js`, `text.js`
+  (ASCII for the board), `startup.js` (HKCU Run value), `log.js`. The page is `public/index.html` (no framework).
 - Keep it CommonJS: pkg bundles CommonJS reliably, ESM not.
 - Any new setting goes in `config.js` `normalize()` (all input passes through it), the page, and for
   board settings also `Settings` in `src/model.h`, `applyConfig`/`protocolSendSettings` and `settings.cpp`.
@@ -71,44 +72,48 @@ flags until the setting is changed on the page (`effective()` in `main.js`).
   `StreamReader` because `Console.In.ReadLineAsync` blocks in .NET Framework, and it exits when
   stdin closes, so it never outlives the companion.
 
-## Status
+## Status (0.4.0)
 
-- Display, screens, alerts, and the companion with `--limits` all work. The board's CH340 (1a86:7523) has
-  shown up as COM12 and COM13 depending on the USB port; COM3 is an unrelated CH9102 with the same vendor
-  id. Auto-detect (`autoPort` in `board.js`) takes only the CH340, never another chip.
-- Firmware 0.3.0: screens Main/Today/Clock/Weather/Media/Calendar/Launcher (clock redraws every second while shown;
-  six styles, `ClockStyle` in `model.h` / `CLOCK_NAMES` in `protocol.cpp` / `CLOCK_STYLES` in `config.js`;
-  style is the `clock` board setting, big digits are TFT_eSPI font 8), each with a nav bar (prev/next/play-pause;
-  tap targets come from `uiHitTest` in `ui.cpp`, actions in `handleTap` in `main.cpp`); settings saved in NVS (`src/settings.cpp`), rotation 0-3 (portrait/landscape, each flippable; landscape has its own Main/Today layouts in `ui.cpp`, touch remapped in `input.cpp`),
-  auto screen cycle, wipe/fade transitions, configurable dim, `preview` frames.
+- Firmware 0.4.0, companion 0.4.0. Seven screens in `View` (`src/ui.h`): Main, Today, Clock, Weather, Media,
+  Calendar, Launcher, plus the Alert and Back overlays. Each pageable screen has a nav bar (prev, next, page
+  dots, play/pause of the auto page change); tap targets come from `uiHitTest` (`ui.cpp`), actions from
+  `handleTap` (`main.cpp`). Text that may not fit goes through `fitText` (`ui.cpp`).
+- Rotation 0-3; landscape has its own Main/Today/Weather/Media layouts; touch is calibrated in portrait
+  (2026-11-27: raw X mirrored, no swap) and remapped per rotation in `input.cpp`.
+- Clock: six styles (`ClockStyle` in `model.h`, `CLOCK_NAMES` in `protocol.cpp`, `CLOCK_STYLES` in
+  `config.js`), redrawn every second while shown; big digits are TFT_eSPI font 8.
 - Back RGB LED (`src/led.cpp`, PWM channels 1-3; the backlight is 0): usage colour, alert/back pulses,
   blue pulse when offline; `led`/`ledlvl` board settings.
+- Weather: `companion/src/weather.js` fetches Open-Meteo every 15 min for `config.weather` (lat/lon from the
+  page's place search, `/api/geocode`); a `weather` frame goes out only when `weatherState.seq` moves, and a
+  fetch's answer is dropped if the place changed while it was out.
 - Media: the tray helper polls Windows' media session (WinRT `GlobalSystemMediaTransportControlsSessionManager`,
-  non-blocking via AsTask) and presses media keys (`key|<vk>`); `media.js` builds the `media` frame and
-  maps the board's `media` event (MediaKey in `ui.h`) to key codes. Board text goes through `text.js` `ascii()`.
-- Weather: `companion/src/weather.js` fetches Open-Meteo every 15 min for `config.weather` (lat/lon from
-  the page's place search, `/api/geocode`) and sends a `weather` frame only when `weatherState.seq` moves.
-- Launcher: tiles live in the companion config (`apps`); the board gets names only (`apps` frame) and
-  sends a `launch` event, which `launcher.js` opens (`.exe` spawned directly, anything else via the shell).
-- Companion 0.3.0 (`companion/src/`, CommonJS so pkg can bundle it): tray icon via a hidden PowerShell
-  NotifyIcon helper, settings page on 127.0.0.1:47820 (Host check + JSON-only POST), config in
-  `%APPDATA%\claudeBoard`, single instance via the UI port. `npm run build:exe` -> `dist/claudeBoard.exe`.
+  non-blocking via AsTask) and presses media keys (`key|<vk>`); `media.js` builds the `media` frame and maps
+  the board's `media` event (MediaKey in `ui.h`) to key codes. Board text goes through `text.js` `ascii()`.
+- Launcher: tiles live in the companion config (`apps`); the board gets names only (`apps` frame) and sends a
+  `launch` event, which `launcher.js` opens (`.exe` spawned directly, anything else via the shell); the tray
+  helper then raises the app's window (`front|...`), since Windows won't let a background process do it.
+- Companion (CommonJS so pkg can bundle it): tray icon via a hidden PowerShell NotifyIcon helper, settings page
+  on 127.0.0.1:47820 (Host check + JSON-only POST), config in `%APPDATA%\claudeBoard`, single instance via the
+  UI port. It detects firmware without the 0.3+ screens from hello (`screens`) and says so on the page.
+- The board's CH340 (1a86:7523) has shown up as COM12 and COM13 depending on the USB port; COM3 is an
+  unrelated CH9102 with the same vendor id. Auto-detect (`autoPort` in `board.js`) takes only the CH340.
 - `--limits` reads the `claude` CLI sign-in from `~/.claude/.credentials.json` and calls the undocumented
-  `api.anthropic.com/api/oauth/usage` endpoint. The token expires every few hours; running `claude` renews it.
-  The desktop app's sign-in is not in that file.
-- Claude credentials never go to the board.
-- Touch calibrated 2026-11-27 for portrait (raw X mirrored, no swap); `TOUCH_DEBUG` prints
-  `{"type":"touch",...}` per tap if it needs redoing.
-- Tested on the board: cfg echo, NVS surviving a reset, live settings from the page, reconnect.
-  Not yet checked by eye: wipe/fade on the glass, taps in the flipped orientation, the tray icon.
+  `api.anthropic.com/api/oauth/usage` endpoint; the token expires every few hours and running `claude`
+  renews it (the desktop app's sign-in is not in that file). Claude credentials never go to the board.
+- Every commit is reviewed by `.githooks/post-commit` (headless, read-only `claude -p`, results in `reviews/`,
+  git-ignored); enable per clone with `git config core.hooksPath .githooks`.
+- Debug switches `-DBOOT_SELFTEST=1` and `-DTOUCH_DEBUG=1` are commented out in `platformio.ini`.
+- Tested over serial on the board: every screen, style and state in portrait and landscape, cfg echo, NVS
+  across a reset, reconnect. Not yet checked by eye on the glass: the layouts, landscape taps, the media
+  keys acting on the PC, the LED colours, apps coming to the front, the tray icon.
 
 ## Next steps
 
-1. Check the transitions, landscape layouts, nav bar, calendar and launcher, and the flipped/landscape
-   taps by eye; tune the wipe strip size/delay in
-   `uiRender` (`src/ui.cpp`) if it looks slow or tears.
-2. Remove `-DBOOT_SELFTEST=1` (red/green/blue flash at boot) and `-DTOUCH_DEBUG=1` once happy.
-3. Exe icon/version resources (not set yet; editing resources after pkg can break its payload).
+1. Check the items above on the glass; tune layouts in `ui.cpp` (geometry is in small `*Geo` functions or
+   at the top of each `draw*`), and the wipe strip size/delay in `uiRender` if it looks slow or tears.
+2. Exe icon/version resources (not set yet; editing resources after pkg can break its payload).
+3. Ideas not started: degrees F / mph for weather, alert beeps on the unused speaker (amp enable GPIO 4).
 
 ## Build notes (Windows)
 

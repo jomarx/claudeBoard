@@ -1,7 +1,7 @@
 #pragma once
 #include <Arduino.h>
 
-#define FW_VERSION "0.3.0"
+#define FW_VERSION "0.4.0"
 
 // How long without a usage frame before the status dot changes.
 #define STALE_AFTER_MS   (120UL * 1000UL)
