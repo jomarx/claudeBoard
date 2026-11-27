@@ -44,10 +44,15 @@
 //       -> USB ONLY: stores the Wi-Fi network, the board's fixed address, the server and the
 //       pairing token; answers with net. Refused over Wi-Fi. "sync":"wifi" in cfg then uses it.
 //   {"type":"net"}                                     -> device answers with net
-//   {"type":"authok"}                                  (server accepted the token; nothing to do)
+//   {"type":"setup","open":true|false}                 -> USB ONLY: open or close Wi-Fi setup on the
+//       board (its own network + a page at 192.168.4.1, see portal.h); same as holding BOOT 5 s
 //
-// Over Wi-Fi the same messages travel one per WebSocket text message, on ws://host:port/board.
-// The board's first message there is {"type":"auth","token":"..."}, then hello and cfg.
+// Over Wi-Fi the same messages travel one per WebSocket text message, on ws://host:port/board,
+// after a handshake (net.cpp, companion/src/lan.js) in which the token never crosses the network:
+//   server -> board  {"type":"challenge","nonce":"<32 random hex>"}
+//   board -> server  {"type":"auth","hmac":"<HMAC-SHA256(token, nonce), 64 hex>"}
+//   server -> board  {"type":"authok"}   then the board sends hello and cfg
+// A wrong answer closes the socket; 5 in a minute lock that address out for a minute.
 // Replies go back on the link the request came in on; events go to the Sync link.
 //
 // Device -> host
@@ -80,6 +85,7 @@ struct Requests {
   bool media = false;     // a media (now playing) frame arrived
   int preview = -1;       // 0 = alert, 1 = back
   bool net = false;       // new Wi-Fi settings were stored
+  int setup = -1;         // 1 = open Wi-Fi setup on the board, 0 = close it
 };
 
 // Which link a message came in on; its replies go back the same way.

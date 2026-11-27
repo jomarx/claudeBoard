@@ -1,14 +1,17 @@
 #include "net.h"
 #include "model.h"
 #include "protocol.h"
+#include "portal.h"
 #include <WiFi.h>
 #include <Preferences.h>
 #include <WebSocketsClient.h>
+#include <ArduinoJson.h>
+#include <mbedtls/md.h>
 
 static NetSettings cfg;
 static WebSocketsClient ws;
 static bool running = false;    // radio on, client started
-static bool serverUp = false;   // WebSocket open (auth sent)
+static bool serverUp = false;   // WebSocket open and the server accepted our challenge answer
 static Requests *pending = nullptr;
 
 // Print that sends each completed line as one WebSocket text message. Lines written while
@@ -57,27 +60,61 @@ void netSave(const NetSettings &n) {
   p.end();
 }
 
+const char *netCheck(const NetSettings &n) {
+  if (!n.ssid[0]) return "the Wi-Fi network name is missing";
+  if (!n.ip || !n.gw || !n.mask) return "the board IP, gateway and subnet mask are all needed";
+  if ((n.ip & n.mask) != (n.gw & n.mask)) return "the board IP is not in the gateway's subnet";
+  if (!n.host[0]) return "the server address is missing";
+  if (strlen(n.token) != 32) return "the pairing token must be the 32 characters shown on the companion's page";
+  for (const char *p = n.token; *p; p++)
+    if (!isxdigit((unsigned char)*p)) return "the pairing token has a character that is not 0-9 or a-f";
+  return nullptr;
+}
+
+// HMAC-SHA256(key, msg) as 64 lowercase hex characters.
+static void hmacHex(const char *key, const char *msg, char hex[65]) {
+  uint8_t mac[32];
+  mbedtls_md_hmac(mbedtls_md_info_from_type(MBEDTLS_MD_SHA256), (const uint8_t *)key, strlen(key),
+                  (const uint8_t *)msg, strlen(msg), mac);
+  for (int i = 0; i < 32; i++) snprintf(hex + 2 * i, 3, "%02x", mac[i]);
+}
+
+// Before authok only the handshake is spoken: the server's {"type":"challenge","nonce":...}
+// gets {"type":"auth","hmac":HMAC-SHA256(token, nonce)}, so the token itself never goes over
+// the network, and a captured answer is useless for the next connection.
+static void handshake(const char *line) {
+  JsonDocument d;
+  if (deserializeJson(d, line)) return;
+  const char *type = d["type"] | "";
+  if (!strcmp(type, "challenge")) {
+    const char *nonce = d["nonce"] | "";
+    if (strlen(nonce) < 16 || strlen(nonce) > 64) return;
+    char hex[65], auth[96];
+    hmacHex(cfg.token, nonce, hex);
+    snprintf(auth, sizeof auth, "{\"type\":\"auth\",\"hmac\":\"%s\"}", hex);
+    ws.sendTXT(auth);
+  } else if (!strcmp(type, "authok")) {
+    serverUp = true;
+    protocolSendHello(out, true);
+    protocolSendSettings(out);
+  }
+}
+
 static void onWs(WStype_t type, uint8_t *payload, size_t length) {
   switch (type) {
-    case WStype_CONNECTED: {
-      serverUp = true;
-      // The server drops anything before a valid token.
-      char auth[112];
-      snprintf(auth, sizeof auth, "{\"type\":\"auth\",\"token\":\"%s\"}", cfg.token);
-      ws.sendTXT(auth);
-      protocolSendHello(out, true);
-      protocolSendSettings(out);
+    case WStype_CONNECTED:
+      serverUp = false;   // not until the server accepts our answer to its challenge
       break;
-    }
     case WStype_DISCONNECTED:
       serverUp = false;
       break;
     case WStype_TEXT: {
       static char line[2048];
-      if (!pending || length >= sizeof line) break;
+      if (length >= sizeof line) break;
       memcpy(line, payload, length);
       line[length] = 0;
-      protocolHandleLine(line, *pending, Link::Wifi);
+      if (!serverUp) handshake(line);
+      else if (pending) protocolHandleLine(line, *pending, Link::Wifi);
       break;
     }
     default:
@@ -86,6 +123,8 @@ static void onWs(WStype_t type, uint8_t *payload, size_t length) {
 }
 
 void netApply() {
+  // The setup network owns the radio while it is open; portalStop() calls back here.
+  if (portalActive()) return;
   if (running) {
     ws.disconnect();
     WiFi.disconnect(true);
@@ -93,8 +132,12 @@ void netApply() {
     running = false;
     serverUp = false;
   }
-  // USB mode never turns the radio on (it would also take heap the screen buffer needs).
-  if (g_settings.sync != SyncMode::Wifi || !cfg.configured()) return;
+  // USB mode never turns the radio on (it would also take heap the screen buffer needs), and
+  // turns it fully off after the setup network used it, so the Wi-Fi driver's memory comes back.
+  if (g_settings.sync != SyncMode::Wifi || !cfg.configured()) {
+    if (WiFi.getMode() != WIFI_MODE_NULL) WiFi.mode(WIFI_OFF);
+    return;
+  }
 
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);   // a tap should reach the PC without waiting for a sleep cycle

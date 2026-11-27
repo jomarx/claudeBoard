@@ -1,6 +1,7 @@
 #include "protocol.h"
 #include "model.h"
 #include "net.h"
+#include "portal.h"
 #include <ArduinoJson.h>
 
 static char lineBuf[2048];
@@ -77,6 +78,8 @@ static void sendNet(Print &out) {
   d["server"] = netServerConnected() ? "connected" : "not connected";
   d["rssi"] = netRssi();
   // Memory is the main risk of running Wi-Fi beside the 76.8 KB screen buffer: watch it.
+  d["setup"] = portalActive();
+  if (portalActive()) d["setupSsid"] = portalSsid();   // not its password: that stays on the screen
   d["heap"] = ESP.getFreeHeap();
   d["largest"] = ESP.getMaxAllocHeap();
   serializeJson(d, out);
@@ -85,18 +88,15 @@ static void sendNet(Print &out) {
 
 // {"type":"wifi",...} from the companion: the network, the board's fixed address, the
 // server and the token. Only over USB, so nobody on the network can move a board elsewhere.
-static void applyWifi(Print &out, JsonObjectConst d, Link link) {
-  if (link != Link::Usb) { sendErr(out, "wifi settings only over USB"); return; }
+// True when the settings were stored (then Wi-Fi restarts with them).
+static bool applyWifi(Print &out, JsonObjectConst d, Link link) {
+  if (link != Link::Usb) { sendErr(out, "wifi settings only over USB"); return false; }
   IPAddress ip, gw, mask, dns;
   if (!ip.fromString(d["ip"] | "") || !gw.fromString(d["gw"] | "") || !mask.fromString(d["mask"] | "")) {
     sendErr(out, "wifi: ip, gw and mask must be IPv4 addresses");
-    return;
+    return false;
   }
   if (!dns.fromString(d["dns"] | "")) dns = gw;
-  if (((uint32_t)ip & (uint32_t)mask) != ((uint32_t)gw & (uint32_t)mask)) {
-    sendErr(out, "wifi: ip is not in the gateway's subnet");
-    return;
-  }
   NetSettings n;
   strlcpy(n.ssid, d["ssid"] | "", sizeof n.ssid);
   strlcpy(n.pass, d["pass"] | "", sizeof n.pass);
@@ -107,9 +107,15 @@ static void applyWifi(Print &out, JsonObjectConst d, Link link) {
   n.gw = (uint32_t)gw;
   n.mask = (uint32_t)mask;
   n.dns = (uint32_t)dns;
-  if (!n.configured()) { sendErr(out, "wifi: ssid, host and token are required"); return; }
+  if (const char *why = netCheck(n)) {
+    char msg[96];
+    snprintf(msg, sizeof msg, "wifi: %s", why);
+    sendErr(out, msg);
+    return false;
+  }
   netSave(n);
   sendNet(out);
+  return true;
 }
 
 static void readLimit(JsonObjectConst o, int16_t &pct, uint32_t *reset) {
@@ -286,12 +292,18 @@ void protocolHandleLine(const char *line, Requests &req, Link link) {
     return;
   }
   if (!strcmp(type, "wifi")) {
-    applyWifi(out, doc.as<JsonObjectConst>(), link);
-    req.net = true;
+    // Only stored settings restart Wi-Fi; a refused message leaves a working link alone.
+    if (applyWifi(out, doc.as<JsonObjectConst>(), link)) req.net = true;
     return;
   }
   if (!strcmp(type, "net")) {
     sendNet(out);
+    return;
+  }
+  if (!strcmp(type, "setup")) {
+    // Like the wifi message: only from someone with the cable.
+    if (link != Link::Usb) { sendErr(out, "setup only over USB"); return; }
+    req.setup = (doc["open"] | true) ? 1 : 0;
     return;
   }
   if (!strcmp(type, "authok")) return;   // the server accepted our token

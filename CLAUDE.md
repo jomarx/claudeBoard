@@ -105,8 +105,9 @@ flags until the setting is changed on the page (`effective()` in `main.js`).
 - Every commit is reviewed by `.githooks/post-commit` (headless, read-only `claude -p`, results in `reviews/`,
   git-ignored); enable per clone with `git config core.hooksPath .githooks`.
 - Wi-Fi sync (0.5.0): Sync is USB **or** Wi-Fi (board setting `sync`), never both. Over Wi-Fi the board
-  (`src/net.cpp`: station with a fixed IP + `links2004/WebSockets` client) sends `auth` with the pairing
-  token, then the same protocol messages as USB, one per WebSocket message. `protocolHandleLine(line, req,
+  (`src/net.cpp`: station with a fixed IP + `links2004/WebSockets` client) answers the server's `challenge`
+  with `auth` = HMAC-SHA256(pairing token, nonce) (the token never crosses the network), then sends the
+  same protocol messages as USB, one per WebSocket message. `protocolHandleLine(line, req,
   link)` answers on the link a message came from; events go to the Sync link (`protocolEventOut`). Network
   settings live in NVS namespace `net`, outside `Settings`, so the password and token are never echoed;
   they arrive only in a `wifi` message over USB. The companion's `hub.js` holds the USB `Board` and any
@@ -114,7 +115,13 @@ flags until the setting is changed on the page (`effective()` in `main.js`).
   link. `lan.js` listens on `0.0.0.0:<lan.port>` (default 47821) only while Sync is Wi-Fi; the settings
   page stays on 127.0.0.1. Test the LAN side without hardware: `node tools/fake_wifi_board.js host port token`.
   Measured on the board: largest free block 70 KB before Wi-Fi, 45 KB with it (the screen buffer is
-  allocated before Wi-Fi starts).
+  allocated before Wi-Fi starts). USB mode keeps the radio fully off (`WiFi.mode(WIFI_OFF)`).
+- Setup on the board (`src/portal.cpp`): BOOT held 5 s, the page's "Open Wi-Fi setup on the board", the USB
+  `setup` message, or Wi-Fi Sync with nothing stored opens a WPA2 network `claudeBoard-XXXX` (fresh 8-digit
+  password on the screen) with a captive form at 192.168.4.1; saving stores, sets Sync to Wi-Fi, restarts.
+  Nothing is erased by opening it. `netCheck()` validates for both the USB `wifi` message and the form.
+- Screens: an 8th page, Network (Sync, Wi-Fi, signal, board IP, server, free memory); in Wi-Fi Sync the
+  header shows a Wi-Fi mark (green server up, amber network only, red no network).
 - Debug switches `-DBOOT_SELFTEST=1` and `-DTOUCH_DEBUG=1` are commented out in `platformio.ini`.
 - Tested over serial on the board: every screen, style and state in portrait and landscape, cfg echo, NVS
   across a reset, reconnect. Not yet checked by eye on the glass: the layouts, landscape taps, the media
@@ -122,8 +129,8 @@ flags until the setting is changed on the page (`effective()` in `main.js`).
 
 ## Next steps
 
-1. Wi-Fi sync phase 4 (setup page on the board itself, `portal.cpp`, BOOT held 5 s) and phase 5 (Network
-   screen, link mark in the header) from the Wi-Fi plan; then a test on the real network.
+1. Test Wi-Fi sync on the real network (the setup form or the page), and the on-board setup from a phone;
+   the PC used so far has no Wi-Fi adapter, so neither was possible from it.
 2. Check the items above on the glass; tune layouts in `ui.cpp` (geometry is in small `*Geo` functions or
    at the top of each `draw*`), and the wipe strip size/delay in `uiRender` if it looks slow or tears.
 3. Exe icon/version resources (not set yet; editing resources after pkg can break its payload).

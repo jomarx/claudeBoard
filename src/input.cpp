@@ -3,6 +3,7 @@
 
 static const int BOOT_BTN_PIN = 0;
 static const uint32_t LONG_MS = 700;
+static const uint32_t HOLD_MS = 5000;
 static const uint32_t DEBOUNCE_MS = 30;
 
 // ---------- raw touch ----------
@@ -93,7 +94,7 @@ static bool tDown = false, tLongSent = false;
 static uint32_t tStart = 0, tLastSeen = 0;
 static int tx = 0, ty = 0;
 
-static bool bDown = false, bLongSent = false;
+static bool bDown = false, bLongSent = false, bHoldSent = false;
 static uint32_t bStart = 0;
 
 void inputBegin() {
@@ -114,10 +115,14 @@ InputEvent inputPoll() {
     pressed = false;
   }
   if (pressed && !bDown) {
-    bDown = true; bLongSent = false; bStart = now;
+    bDown = true; bLongSent = false; bHoldSent = false; bStart = now;
   } else if (pressed && bDown && !bLongSent && now - bStart > LONG_MS) {
     bLongSent = true;
     ev.kind = InputKind::ButtonLong;
+    return ev;
+  } else if (pressed && bDown && bLongSent && !bHoldSent && now - bStart > HOLD_MS) {
+    bHoldSent = true;
+    ev.kind = InputKind::ButtonHold;
     return ev;
   } else if (!pressed && bDown) {
     bDown = false;

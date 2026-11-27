@@ -128,6 +128,14 @@
         this PC needs a fixed IP too. Windows may ask to allow the companion on the network: allow it for private networks.</div>
     </div>
     <div class="row">
+      <label>Setup on the board</label>
+      <div class="inline">
+        <button class="act" data-action="board-setup" type="button">Open Wi-Fi setup on the board</button>
+      </div>
+      <div class="hint">Or hold the board's BOOT button for 5 s. The board opens its own Wi-Fi network and shows
+        its name and password; join it from a phone and the setup page opens. Cancel on the board closes it.</div>
+    </div>
+    <div class="row">
       <label>Pairing token</label>
       <div class="inline"><code id="lan-token"></code><button class="act" id="lan-token-new" type="button">New token</button></div>
       <div class="hint">Boards must present it. A new one disconnects every Wi-Fi board until its Wi-Fi setup is sent again.</div>

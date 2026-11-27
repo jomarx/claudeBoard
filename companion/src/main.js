@@ -350,6 +350,15 @@ async function run() {
         case 'back': board.send({ type: 'preview', view: 'back' }); break;
         case 'reconnect': board.reconnect(); break;
         case 'wifi-setup': await wifiSetup(body); break;
+        case 'board-setup': {
+          // Opens Wi-Fi setup on the plugged-in board (its own network and page), as BOOT held 5 s does.
+          if (!usbBoard.state.connected) throw new Error('plug the board in over USB first');
+          usbBoard.send({ type: 'setup', open: body.open !== false });
+          await new Promise((r) => setTimeout(r, 300));
+          usbBoard.send({ type: 'net' });
+          await new Promise((r) => setTimeout(r, 300));
+          break;
+        }
         case 'lan-token': {
           // A new token un-pairs every Wi-Fi board; each needs its Wi-Fi setup sent again.
           saved = config.normalize({ ...saved, lan: { ...saved.lan, token: crypto.randomBytes(16).toString('hex') } });

@@ -1,5 +1,6 @@
 #include "ui.h"
 #include "net.h"
+#include "portal.h"
 #include "model.h"
 #include <TFT_eSPI.h>
 #include <time.h>
@@ -145,11 +146,25 @@ static void header(const char *left, uint16_t bg) {
   }
   int w = g.width(right, 2);
   g.text(right, W - 12, 6, 2, C_TEXT, bg, TR_DATUM);
-  g.circle(W - 12 - w - 8, 13, 3, dot);
+  const int dotX = W - 12 - w - 8;
+  g.circle(dotX, 13, 3, dot);
+
+  // In Wi-Fi sync, a Wi-Fi mark left of the dot: green = server connected, amber = on the
+  // network but no server, red = not on the network.
+  int markW = 0;
+  if (g_settings.sync == SyncMode::Wifi) {
+    const uint16_t c = netServerConnected() ? C_GREEN
+                     : !strcmp(netWifiState(), "connected") ? C_AMBER : C_RED;
+    const int cx = dotX - 17, cy = 19;   // the fan's point; 180 = 12 o'clock in TFT_eSPI angles
+    g.arc(cx, cy, 10, 8, 135, 225, c, bg, false);
+    g.arc(cx, cy, 6, 4, 135, 225, c, bg, false);
+    g.circle(cx, cy - 1, 1, c);
+    markW = 20;
+  }
 
   // The left label gets whatever room the status leaves (a place name can be long):
   // shortened with ".." rather than drawn over the dot.
-  const int room = W - 12 - w - 8 - 3 - 8 - 12;
+  const int room = W - 12 - w - 8 - 3 - 8 - 12 - markW;
   char l[32];
   strlcpy(l, left, sizeof l);
   fitText(l, sizeof l, 2, room);
@@ -1192,6 +1207,82 @@ static void drawBack() {
   g.text("Tap to continue", W / 2, H - 30, 2, C_OK_SUB, C_OK_BG, TC_DATUM);
 }
 
+// Wi-Fi setup is open (portal.cpp): what to join, its password, where to go, and Cancel.
+static void drawSetup() {
+  g.fill(C_BG);
+  header("Wi-Fi setup", C_BG);
+  const int phones = portalClients();
+  const char *status = phones ? "Phone connected: open the page" : "Waiting for a phone to join";
+  if (land) {
+    // Label / value rows; the values in font 4.
+    g.text("Join", 12, 40, 2, C_MUTED, C_BG);
+    g.text(portalSsid(), 104, 34, 4, C_TEXT, C_BG);
+    g.text("Password", 12, 76, 2, C_MUTED, C_BG);
+    g.text(portalPass(), 104, 70, 4, C_CORAL, C_BG);
+    g.text("Then open", 12, 112, 2, C_MUTED, C_BG);
+    g.text("192.168.4.1", 104, 106, 4, C_TEXT, C_BG);
+    g.text(status, 12, 150, 2, phones ? C_GREEN : C_DIM, C_BG);
+  } else {
+    g.text("On a phone, join this Wi-Fi:", W / 2, 40, 2, C_MUTED, C_BG, TC_DATUM);
+    g.text(portalSsid(), W / 2, 60, 4, C_TEXT, C_BG, TC_DATUM);
+    g.text("password", W / 2, 96, 2, C_MUTED, C_BG, TC_DATUM);
+    g.text(portalPass(), W / 2, 114, 4, C_CORAL, C_BG, TC_DATUM);
+    g.text("then open", W / 2, 152, 2, C_MUTED, C_BG, TC_DATUM);
+    g.text("192.168.4.1", W / 2, 170, 4, C_TEXT, C_BG, TC_DATUM);
+    g.text(status, W / 2, 212, 2, phones ? C_GREEN : C_DIM, C_BG, TC_DATUM);
+  }
+  const int by = btnY();
+  g.rframe(12, by, W - 24, BTN_H, 4, C_MUTED);
+  g.text("Cancel", W / 2, by + BTN_H / 2, 2, C_TEXT, C_BG, MC_DATUM);
+}
+
+// One "label ........ value" line of the Network page; the value shortened to fit.
+static void netRow(const char *label, const char *value, int y, uint16_t valueColor = C_TEXT) {
+  g.text(label, 12, y, 2, C_MUTED, C_BG);
+  char v[64];
+  strlcpy(v, value, sizeof v);
+  fitText(v, sizeof v, 2, W - 24 - g.width(label, 2) - 12);
+  g.text(v, W - 12, y, 2, valueColor, C_BG, TR_DATUM);
+}
+
+static void drawNetwork() {
+  g.fill(C_BG);
+  header("Network", C_BG);
+  const NetSettings &n = netSettings();
+  const bool wifi = g_settings.sync == SyncMode::Wifi;
+  const int step = land ? 20 : 24;
+  int y = land ? 32 : 38;
+  char v[80];
+
+  netRow("Sync", wifi ? "Wi-Fi" : "USB", y);
+  y += step;
+  if (wifi) {
+    const bool on = !strcmp(netWifiState(), "connected");
+    snprintf(v, sizeof v, "%s, %s", n.ssid[0] ? n.ssid : "not set up", netWifiState());
+    netRow("Wi-Fi", v, y, on ? C_TEXT : C_AMBER);
+    y += step;
+    if (on) snprintf(v, sizeof v, "%d dBm", netRssi());
+    else strlcpy(v, "-", sizeof v);
+    netRow("Signal", v, y);
+    y += step;
+    netRow("Board IP", n.ip ? IPAddress(n.ip).toString().c_str() : "-", y);
+    y += step;
+    snprintf(v, sizeof v, "%s:%u %s", n.host, n.port, netServerConnected() ? "up" : "not reached");
+    netRow("Server", n.host[0] ? v : "-", y, netServerConnected() ? C_TEXT : C_AMBER);
+    y += step;
+  } else {
+    snprintf(v, sizeof v, "%s", n.configured() ? "set up, not in use" : "not set up");
+    netRow("Wi-Fi", v, y);
+    y += step;
+  }
+  netRow("Firmware", FW_VERSION, y);
+  y += step;
+  snprintf(v, sizeof v, "%u KB, largest %u KB", (unsigned)(ESP.getFreeHeap() / 1024), (unsigned)(ESP.getMaxAllocHeap() / 1024));
+  netRow("Free memory", v, y);
+  g.text("Hold BOOT 5 s for Wi-Fi setup", W / 2, navTop() - 24, 2, C_DIM, C_BG, TC_DATUM);
+  navBar((int)View::Network);
+}
+
 // ---------- public ----------
 
 void uiBegin() {
@@ -1266,6 +1357,8 @@ static void drawBand(View v, const AlertInfo &alert, int band) {
   switch (v) {
     case View::Alert: drawAlert(alert); break;
     case View::Back: drawBack(); break;
+    case View::Setup: drawSetup(); break;
+    case View::Network: drawNetwork(); break;
     case View::Clock: drawClock(); break;
     case View::Weather: drawWeather(); break;
     case View::Media: drawMedia(); break;
@@ -1321,6 +1414,10 @@ HitResult uiHitTest(View v, int x, int y) {
     return r;
   }
   if (v == View::Back) return r;
+  if (v == View::Setup) {
+    if (y >= btnY() - 10 && y <= btnY() + BTN_H + 10) r.kind = Hit::SetupCancel;
+    return r;
+  }
 
   r.kind = navHit(x, y);
   if (r.kind != Hit::None) return r;

@@ -24,6 +24,9 @@ void netBegin();                        // load the settings; start if Sync is W
 void netApply();                        // (re)start or stop to match Sync and the settings
 void netLoop(Requests &req);            // service the link; incoming messages land in req
 void netSave(const NetSettings &n);     // store new settings (netApply then uses them)
+// Why these settings can't be used, or nullptr when they can. Shared by the USB wifi message
+// and the setup page, so both apply the same rules.
+const char *netCheck(const NetSettings &n);
 const NetSettings &netSettings();
 
 Print &netOut();                        // writes one message per line to the server
