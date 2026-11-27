@@ -12,17 +12,28 @@ void protocolBegin() {
 }
 
 void protocolSendHello() {
-  Serial.printf("{\"type\":\"hello\",\"fw\":\"%s\",\"w\":240,\"h\":320,\"cfg\":true}\n", FW_VERSION);
+  Serial.printf("{\"type\":\"hello\",\"fw\":\"%s\",\"w\":240,\"h\":320,\"cfg\":true,\"apps\":true}\n", FW_VERSION);
+}
+
+// Copies text for the screen: the board fonts are ASCII only, so anything else shows as '?'.
+static void copyAscii(char *dst, size_t n, const char *src) {
+  size_t i = 0;
+  for (; src[i] && i < n - 1; i++) dst[i] = (src[i] >= 32 && src[i] < 127) ? src[i] : '?';
+  dst[i] = 0;
 }
 
 static const char *FX_NAMES[] = {"none", "wipe", "fade"};
+static const char *CLOCK_NAMES[CLOCK_STYLES] = {"digital", "analog", "rings", "flip", "words", "binary"};
+static const char *LED_NAMES[LED_MODES] = {"off", "usage", "alerts"};
 
 void protocolSendSettings() {
   const Settings &s = g_settings;
   Serial.printf("{\"type\":\"cfg\",\"brightness\":%u,\"alert1\":%u,\"alert2\":%u,\"h24\":%s,"
-                "\"rot\":%u,\"cycle\":%u,\"fx\":\"%s\",\"dim\":%u}\n",
+                "\"rot\":%u,\"cycle\":%u,\"fx\":\"%s\",\"dim\":%u,\"clock\":\"%s\","
+                "\"led\":\"%s\",\"ledlvl\":%u}\n",
                 s.brightness, s.alert1, s.alert2, s.h24 ? "true" : "false",
-                s.rot, s.cycle, FX_NAMES[(int)s.fx], s.dim);
+                s.rot, s.cycle, FX_NAMES[(int)s.fx], s.dim, CLOCK_NAMES[(int)s.clock],
+                LED_NAMES[(int)s.led], s.ledLevel);
 }
 
 void protocolSendEvent(const char *name, int value) {
@@ -89,7 +100,10 @@ static void applyConfig(JsonObjectConst d) {
   if (d["alert1"].is<int>()) g_settings.alert1 = constrain(d["alert1"].as<int>(), 1, 100);
   if (d["alert2"].is<int>()) g_settings.alert2 = constrain(d["alert2"].as<int>(), 1, 100);
   if (d["h24"].is<bool>()) g_settings.h24 = d["h24"];
-  if (d["rot"].is<int>()) g_settings.rot = d["rot"].as<int>() == 2 ? 2 : 0;
+  if (d["rot"].is<int>()) {
+    int r = d["rot"].as<int>();
+    g_settings.rot = (r >= 0 && r <= 3) ? r : 0;
+  }
   if (d["cycle"].is<int>()) g_settings.cycle = constrain(d["cycle"].as<int>(), 0, 3600);
   if (d["dim"].is<int>()) g_settings.dim = constrain(d["dim"].as<int>(), 0, 3600);
   const char *fx = d["fx"];
@@ -97,6 +111,17 @@ static void applyConfig(JsonObjectConst d) {
     for (int i = 0; i < 3; i++)
       if (!strcmp(fx, FX_NAMES[i])) g_settings.fx = (Fx)i;
   }
+  const char *clock = d["clock"];
+  if (clock) {
+    for (int i = 0; i < CLOCK_STYLES; i++)
+      if (!strcmp(clock, CLOCK_NAMES[i])) g_settings.clock = (ClockStyle)i;
+  }
+  const char *led = d["led"];
+  if (led) {
+    for (int i = 0; i < LED_MODES; i++)
+      if (!strcmp(led, LED_NAMES[i])) g_settings.led = (LedMode)i;
+  }
+  if (d["ledlvl"].is<int>()) g_settings.ledLevel = constrain(d["ledlvl"].as<int>(), 0, 255);
 }
 
 static void handleLine(const char *line, Requests &req) {
@@ -122,7 +147,55 @@ static void handleLine(const char *line, Requests &req) {
     return;
   }
   if (!strcmp(type, "screen")) {
-    req.screen = doc["n"] | 0;
+    if (doc["step"].is<int>()) req.step = constrain(doc["step"].as<int>(), -1, 1);
+    else req.screen = doc["n"] | 0;
+    return;
+  }
+  if (!strcmp(type, "weather")) {
+    WeatherData &w = g_weather;
+    if (doc["valid"].is<bool>() && !doc["valid"].as<bool>()) {
+      w = WeatherData();
+    } else {
+      copyAscii(w.place, sizeof w.place, doc["place"] | "");
+      w.temp = doc["t"] | 0;
+      w.feels = doc["feels"] | w.temp;
+      w.hi = doc["hi"] | w.temp;
+      w.lo = doc["lo"] | w.temp;
+      w.hum = constrain(doc["hum"] | 0, 0, 100);
+      w.wind = constrain(doc["wind"] | 0, 0, 999);
+      w.rain = constrain(doc["rain"] | -1, -1, 100);
+      w.code = constrain(doc["code"] | 0, 0, 99);
+      w.day = (doc["day"] | 1) != 0;
+      w.at = doc["at"] | 0UL;
+      w.valid = true;
+    }
+    req.weather = true;
+    return;
+  }
+  if (!strcmp(type, "media")) {
+    MediaData &m = g_media;
+    const char *st = doc["state"] | "none";
+    m.state = !strcmp(st, "playing") ? MediaState::Playing
+            : !strcmp(st, "paused") ? MediaState::Paused
+            : !strcmp(st, "stopped") ? MediaState::Stopped : MediaState::None;
+    copyAscii(m.app, sizeof m.app, doc["app"] | "");
+    copyAscii(m.title, sizeof m.title, doc["title"] | "");
+    copyAscii(m.artist, sizeof m.artist, doc["artist"] | "");
+    req.media = true;
+    return;
+  }
+  if (!strcmp(type, "apps")) {
+    JsonArrayConst list = doc["list"];
+    uint8_t n = 0;
+    for (JsonVariantConst v : list) {
+      if (n >= MAX_APPS) break;
+      const char *name = v | "";
+      if (!*name) continue;
+      copyAscii(g_apps[n].name, sizeof g_apps[n].name, name);
+      n++;
+    }
+    g_appCount = n;
+    req.apps = true;
     return;
   }
   if (!strcmp(type, "preview")) {

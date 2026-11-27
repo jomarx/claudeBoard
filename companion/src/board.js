@@ -24,11 +24,13 @@ async function listPorts() {
     .sort((a, b) => a.path.localeCompare(b.path, undefined, { numeric: true }));
 }
 
+// Auto-detect takes only the meter's own chip, a CH340 (1a86:7523). Other USB-serial
+// chips, even the CH9102 from the same vendor, are some other device: writing frames to
+// one would be sending junk to whatever it is. Pick such a port by hand if needed.
 async function autoPort() {
   const ports = await listPorts();
-  const rank = (p) => (p.chip === 'CH340' ? 0 : p.chip ? 1 : 9);
-  const best = ports.filter((p) => p.chip).sort((a, b) => rank(a) - rank(b))[0];
-  return best ? best.path : null;
+  const board = ports.find((p) => p.chip === 'CH340');
+  return board ? board.path : null;
 }
 
 class Board extends EventEmitter {
@@ -41,7 +43,7 @@ class Board extends EventEmitter {
     this.bootTimer = null;
     this.stopped = false;
     this.state = {
-      path: null, connected: false, ready: false, fw: null, cfgCapable: false,
+      path: null, connected: false, ready: false, fw: null, cfgCapable: false, screens: false,
       boardCfg: null, lastAckAt: 0, error: '',
     };
   }
@@ -118,7 +120,7 @@ class Board extends EventEmitter {
         this.helloAskedAt = Date.now();
         this.send({ type: 'hello' });
       });
-      this.status({ path: p, connected: true, ready: false, fw: null, cfgCapable: false, boardCfg: null, error: '' });
+      this.status({ path: p, connected: true, ready: false, fw: null, cfgCapable: false, screens: false, boardCfg: null, error: '' });
       // Opening the port resets the board; give it time to boot, then start anyway.
       this.bootTimer = setTimeout(() => this.markReady(), 3000);
     });
@@ -161,7 +163,8 @@ class Board extends EventEmitter {
         log(`board firmware ${m.fw}`);
         const wasReady = this.state.ready;
         const isReply = Date.now() - (this.helloAskedAt || 0) < 4000;
-        this.status({ fw: m.fw, cfgCapable: !!m.cfg });
+        // "apps" in hello = firmware 0.3+: five screens, relative steps, launcher, rotation 0-3.
+        this.status({ fw: m.fw, cfgCapable: !!m.cfg, screens: !!m.apps });
         // An unasked hello after we started means it rebooted and lost its data.
         if (!wasReady) this.markReady();
         else if (!isReply) this.emit('ready');

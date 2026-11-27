@@ -9,6 +9,9 @@ const { Board, listPorts } = require('./board');
 const { Tray } = require('./tray');
 const { createServer } = require('./server');
 const startup = require('./startup');
+const { launch, frontNames } = require('./launcher');
+const { refreshWeather, weatherFrame, weatherState, geocode } = require('./weather');
+const { MEDIA_VK, mediaFrame } = require('./media');
 const VERSION = require('../package.json').version;
 
 // ---------- command line ----------
@@ -89,15 +92,36 @@ async function run() {
   const url = `http://127.0.0.1:${UI_PORT}/`;
   const board = new Board(effective, { verbose: VERBOSE });
   const tray = NO_TRAY ? null : new Tray();
-  let pushTimer = null, lastFrame = null, lastFrameAt = 0, page = 0;
+  // Watch for the app's window before starting it, so Windows' focus rules don't leave it behind.
+  const open = (a) => { if (tray) tray.front(frontNames(a)); launch(a); };
+  let pushTimer = null, lastFrame = null, lastFrameAt = 0;
   let startupOn = false;
 
   const sendBoardCfg = () => board.send({ type: 'cfg', ...effective().board });
+  // The board only gets the tile names; paths stay here. Its fonts are ASCII only.
+  const sendApps = () => board.send({
+    type: 'apps',
+    list: effective().apps.map((a) => a.name.replace(/[^\x20-\x7e]/g, '?')),
+  });
+
+  // Now playing, as last reported by the tray helper; sent on every change and on (re)connect.
+  let media = mediaFrame(null);
+  const sendMedia = () => { if (board.state.ready) board.send(media); };
+  if (tray) tray.on('media', (m) => { media = mediaFrame(m); sendMedia(); });
+
+  // Weather goes out only when there is something new (weatherState.seq moved) or the
+  // board came back; -1 forces the next push to send it.
+  let weatherSent = -1;
+  const sendWeather = (cfg) => {
+    if (weatherState.seq === weatherSent) return;
+    if (board.send(weatherFrame(cfg))) weatherSent = weatherState.seq;
+  };
 
   const push = async () => {
     const cfg = effective();
-    await refreshLimits(cfg);
+    await Promise.all([refreshLimits(cfg), refreshWeather(cfg)]);
     if (!board.state.ready) return;
+    sendWeather(cfg);
     const f = buildFrame(cfg);
     if (board.send(f)) {
       lastFrame = f;
@@ -118,11 +142,24 @@ async function run() {
 
   board.on('ready', () => {
     sendBoardCfg();
+    sendApps();
+    weatherSent = -1;   // a (re)booted board has no weather
+    sendMedia();
     push();
     schedule();
   });
   board.on('event', (m) => {
-    if (m.name === 'screen') page = m.value;
+    if (m.name === 'media') {
+      // The keys go through the tray helper; without it (--no-tray) there's nothing to press them.
+      const vk = MEDIA_VK[m.value];
+      if (vk && tray) tray.key(vk);
+      else if (vk) log('media buttons need the tray helper (running with --no-tray)');
+    }
+    if (m.name === 'launch') {
+      const a = effective().apps[m.value];
+      if (a) open(a);
+      else log(`board asked for app ${m.value}, which isn't set`);
+    }
     if (m.name === 'brightness' && Number.isFinite(m.value)) {
       // Long press on the board changed brightness: remember it.
       delete ovBoard.brightness;
@@ -163,6 +200,8 @@ async function run() {
         overridden: [...Object.keys(overrides), ...Object.keys(ovBoard).map((k) => 'board.' + k)],
         board: board.state,
         limits: { enabled: cfg.limits, ok: !!limitsState.data && !limitsState.error, error: limitsState.error, at: limitsState.at },
+        weather: { set: cfg.weather.lat !== null, data: weatherState.data, error: weatherState.error, at: weatherState.at },
+        media,
         lastFrame: lastFrame && {
           at: lastFrameAt, plan: lastFrame.plan, tokens: lastFrame.today.tokens, cost: lastFrame.today.cost,
           session: lastFrame.session.pct, week: lastFrame.week.pct,
@@ -173,6 +212,7 @@ async function run() {
       };
     },
     ports: () => listPorts(),
+    geocode: (q) => geocode(q),
     async updateConfig(body) {
       const before = effective();
       // Anything set on the page stops being overridden by the command line.
@@ -184,6 +224,11 @@ async function run() {
 
       if (after.port !== before.port) { log(`port set to ${after.port}`); board.reconnect(); }
       if (!sameJSON(after.board, before.board)) sendBoardCfg();
+      if (!sameJSON(after.apps, before.apps)) sendApps();
+      if (!sameJSON(after.weather, before.weather)) {
+        await refreshWeather(after, true);
+        sendWeather(after);
+      }
       if (after.interval !== before.interval) schedule();
       if (after.limits !== before.limits) await refreshLimits(after, true);
       if (after.limits !== before.limits || after.plan !== before.plan || after.sessionBudget !== before.sessionBudget) push();
@@ -194,12 +239,25 @@ async function run() {
       updateTray();
       return app.state();
     },
-    async action(name) {
+    async action(name, body = {}) {
       switch (name) {
-        case 'next': page = (page + 1) % 2; board.send({ type: 'screen', n: page }); break;
+        // A relative step lets the board wrap around however many screens it has.
+        // Firmware before 0.3 reads a step as "screen 0", so don't send it one.
+        case 'next':
+        case 'prev':
+          if (board.state.ready && !board.state.screens) throw new Error('the board firmware is older than 0.3.0; flash it to page from here');
+          board.send({ type: 'screen', step: name === 'next' ? 1 : -1 });
+          break;
+        case 'launch': {
+          const a = effective().apps[Number(body.index)];
+          if (!a) throw new Error('no such app');
+          open(a);
+          break;
+        }
         case 'alert': board.send({ type: 'preview', view: 'alert' }); break;
         case 'back': board.send({ type: 'preview', view: 'back' }); break;
         case 'reconnect': board.reconnect(); break;
+        case 'weather': await refreshWeather(effective(), true); sendWeather(effective()); break;
         case 'push': await refreshLimits(effective(), true); await push(); break;
         default: throw new Error('unknown action');
       }

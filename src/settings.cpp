@@ -14,10 +14,15 @@ void settingsLoad() {
     s.alert1 = prefs.getUChar("alert1", s.alert1);
     s.alert2 = prefs.getUChar("alert2", s.alert2);
     s.h24 = prefs.getBool("h24", s.h24);
-    s.rot = prefs.getUChar("rot", s.rot) == 2 ? 2 : 0;
+    s.rot = prefs.getUChar("rot", s.rot) & 3;
     s.cycle = prefs.getUShort("cycle", s.cycle);
     uint8_t fx = prefs.getUChar("fx", 0);
     s.fx = fx <= 2 ? (Fx)fx : Fx::None;
+    uint8_t clock = prefs.getUChar("clock", 0);
+    s.clock = clock < CLOCK_STYLES ? (ClockStyle)clock : ClockStyle::Digital;
+    uint8_t led = prefs.getUChar("led", (uint8_t)s.led);
+    s.led = led < LED_MODES ? (LedMode)led : LedMode::Usage;
+    s.ledLevel = prefs.getUChar("ledlvl", s.ledLevel);
     s.dim = prefs.getUShort("dim", s.dim);
     g_settings = s;
   }
@@ -37,6 +42,9 @@ void settingsSave() {
   prefs.putUChar("rot", s.rot);
   prefs.putUShort("cycle", s.cycle);
   prefs.putUChar("fx", (uint8_t)s.fx);
+  prefs.putUChar("clock", (uint8_t)s.clock);
+  prefs.putUChar("led", (uint8_t)s.led);
+  prefs.putUChar("ledlvl", s.ledLevel);
   prefs.putUShort("dim", s.dim);
   prefs.end();
   saved = s;

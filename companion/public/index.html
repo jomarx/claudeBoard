@@ -49,6 +49,15 @@
   pre { background: var(--bg); border-radius: 8px; padding: 10px; margin: 0; max-height: 220px; overflow: auto;
     font: 12px/1.5 ui-monospace, Consolas, monospace; color: var(--muted); white-space: pre-wrap; }
   .files { color: var(--dim); font-size: 12px; margin-top: 8px; overflow-wrap: anywhere; }
+  .lead { color: var(--dim); font-size: 12px; margin: -4px 0 10px; }
+  .app-row { display: grid; grid-template-columns: 130px 1fr 150px auto; gap: 8px; align-items: center; padding: 6px 0; }
+  .app-row + .app-row { border-top: 1px solid var(--line); }
+  .app-row input { width: 100%; }
+  .app-row .btns { display: flex; gap: 4px; }
+  .app-row .btns button { padding: 6px 9px; }
+  .app-row.new { border-top: 1px solid var(--line); margin-top: 4px; padding-top: 12px; }
+  button.act:disabled { opacity: .4; cursor: default; }
+  .empty { color: var(--dim); padding: 6px 0; }
 </style>
 </head>
 <body>
@@ -90,11 +99,27 @@
       <div class="seg" data-board="rot" data-type="int">
         <button type="button" data-v="0">Portrait</button>
         <button type="button" data-v="2">Portrait flipped</button>
+        <button type="button" data-v="1">Landscape</button>
+        <button type="button" data-v="3">Landscape flipped</button>
       </div>
     </div>
     <div class="row">
       <label for="brightness">Brightness</label>
-      <div class="inline"><input id="brightness" type="range" min="5" max="255" data-board="brightness"><span id="brightness-v"></span></div>
+      <div class="inline"><input id="brightness" type="range" min="5" max="255" data-board="brightness"><span class="range-v"></span></div>
+    </div>
+    <div class="row">
+      <label>Back LED</label>
+      <div class="seg" data-board="led">
+        <button type="button" data-v="usage">Usage colour</button>
+        <button type="button" data-v="alerts">Alerts only</button>
+        <button type="button" data-v="off">Off</button>
+      </div>
+      <div class="hint">Usage colour: green / amber / red like the gauge, a red pulse during an alert,
+        green when the limit resets, slow blue when there's no data from this PC.</div>
+    </div>
+    <div class="row">
+      <label for="ledlvl">LED brightness</label>
+      <div class="inline"><input id="ledlvl" type="range" min="0" max="255" data-board="ledlvl"><span class="range-v"></span></div>
     </div>
     <div class="row">
       <label for="dim">Dim when idle after</label>
@@ -115,7 +140,8 @@
     <div class="row">
       <label for="cycle">Change screen every</label>
       <div class="inline"><input id="cycle" type="number" min="0" max="3600" data-board="cycle"> seconds</div>
-      <div class="hint">0 = only when you tap. Alerts are never cycled away.</div>
+      <div class="hint">0 = only when you tap. The play/pause button on the board starts and stops it
+        (every 10 s when this is 0). Alerts are never cycled away.</div>
     </div>
     <div class="row">
       <label>Transition</label>
@@ -126,12 +152,61 @@
       </div>
     </div>
     <div class="row">
+      <label>Clock style</label>
+      <div class="seg" data-board="clock">
+        <button type="button" data-v="digital">Digital</button>
+        <button type="button" data-v="analog">Analog</button>
+        <button type="button" data-v="rings">Rings</button>
+        <button type="button" data-v="flip">Flip</button>
+        <button type="button" data-v="words">Words</button>
+        <button type="button" data-v="binary">Binary</button>
+      </div>
+      <div class="hint">The clock screen; 12/24-hour follows the Clock setting above.</div>
+    </div>
+    <div class="row">
       <label>Try it</label>
       <div class="inline">
+        <button class="act" data-action="prev" type="button">Previous screen</button>
         <button class="act" data-action="next" type="button">Next screen</button>
         <button class="act" data-action="alert" type="button">Preview alert</button>
         <button class="act" data-action="back" type="button">Preview "you're back"</button>
       </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Weather</h2>
+    <p class="lead">For the board's Weather screen, from Open-Meteo (no account needed). Only the
+      place you pick is sent there; it updates every 15 minutes.</p>
+    <div class="row">
+      <label>Location</label>
+      <div class="inline">
+        <span id="w-place">-</span>
+        <button class="act" id="w-refresh" type="button">Update now</button>
+        <button class="act" id="w-clear" type="button">Clear</button>
+      </div>
+      <div class="hint" id="w-status"></div>
+    </div>
+    <div class="row">
+      <label for="w-q">Find a place</label>
+      <div class="inline">
+        <input type="text" id="w-q" maxlength="80" placeholder="City or town, e.g. Makati">
+        <button class="act" id="w-search" type="button">Search</button>
+      </div>
+      <div class="hint" id="w-results"></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Launcher</h2>
+    <p class="lead">Tiles on the board's Apps screen, up to 8. Tapping one opens it on this PC: a program
+      (.exe, with optional arguments), or a file, folder or URL (arguments don't apply to those).</p>
+    <div id="apps"></div>
+    <div class="app-row new">
+      <input type="text" id="app-name" maxlength="15" placeholder="Name on the board">
+      <input type="text" id="app-path" maxlength="512" placeholder="C:\Program Files\...\app.exe, a file, folder or https://...">
+      <input type="text" id="app-args" maxlength="512" placeholder="Arguments">
+      <div class="btns"><button class="act" id="app-add" type="button">Add</button></div>
     </div>
   </section>
 
@@ -220,7 +295,7 @@ function render(s) {
   const dot = !b.connected ? 'bad' : b.ready ? 'ok' : 'warn';
   $('s-board').innerHTML = `<span class="dot ${dot}"></span>`;
   $('s-board').append(b.connected ? b.path : (b.path ? b.path + ' (closed)' : 'not found'));
-  $('s-fw').textContent = b.fw ? b.fw + (b.cfgCapable ? '' : ' (update for settings)') : '-';
+  $('s-fw').textContent = b.fw ? b.fw + (!b.cfgCapable ? ' (update for settings)' : !b.screens ? ' (flash 0.3 for the new screens)' : '') : '-';
   const f = s.lastFrame;
   $('s-last').textContent = f ? ago(f.at) : 'never';
   $('s-today').textContent = f ? `${(f.tokens / 1e6).toFixed(1)}M tok · $${f.cost.toFixed(2)}` : '-';
@@ -251,7 +326,10 @@ function render(s) {
       }
     }
   }
-  $('brightness-v').textContent = $('brightness').value;
+  renderApps(c.apps);
+  renderWeather(c.weather, s.weather);
+  // Each slider shows its value in the span right after it.
+  for (const r of document.querySelectorAll('input[type=range]')) r.nextElementSibling.textContent = r.value;
   $('startup').checked = s.startup;
   if (!$('port').matches(':focus')) $('port').value = c.port;
   $('files').textContent = `Settings: ${s.files.config} · Log: ${s.files.log}`;
@@ -259,6 +337,133 @@ function render(s) {
   log.textContent = s.log.join('\n');
   if (atBottom) log.scrollTop = log.scrollHeight;
 }
+
+// ---------- weather ----------
+
+function renderWeather(loc, w) {
+  $('w-place').textContent = loc.lat === null ? 'not set' : `${loc.name || 'Unnamed'} (${loc.lat}, ${loc.lon})`;
+  $('w-refresh').disabled = $('w-clear').disabled = loc.lat === null;
+  let st = '';
+  if (w.error) st = 'Last try failed: ' + w.error;
+  else if (w.data) st = `${w.data.t}°C, humidity ${w.data.hum}%, wind ${w.data.wind} km/h · fetched ${ago(w.at)}`;
+  else if (loc.lat !== null) st = 'Fetching...';
+  $('w-status').textContent = st;
+}
+
+async function searchPlace() {
+  const q = $('w-q').value.trim();
+  const box = $('w-results');
+  if (q.length < 2) { box.textContent = 'Type at least 2 letters.'; return; }
+  box.textContent = 'Searching...';
+  try {
+    const list = await api('/api/geocode', { q });
+    box.replaceChildren();
+    if (!list.length) { box.textContent = 'No places found.'; return; }
+    for (const p of list) {
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'act'; b.style.margin = '4px 6px 0 0';
+      b.textContent = p.label;
+      b.addEventListener('click', async () => {
+        box.textContent = '';
+        $('w-q').value = '';
+        await save({ weather: { name: p.name, lat: p.lat, lon: p.lon } });
+      });
+      box.append(b);
+    }
+  } catch (e) { box.textContent = 'Search failed: ' + e.message; }
+}
+
+$('w-search').addEventListener('click', searchPlace);
+$('w-q').addEventListener('keydown', (e) => { if (e.key === 'Enter') searchPlace(); });
+$('w-clear').addEventListener('click', () => save({ weather: { lat: null } }));
+$('w-refresh').addEventListener('click', async () => {
+  try { render(await api('/api/action', { action: 'weather' })); } catch (e) { alertBox(e.message); }
+});
+
+// ---------- launcher apps ----------
+
+const MAX_APPS = 8;
+let appsShown = null;   // JSON of the list the rows were built from
+
+function textInput(value, placeholder, max) {
+  const el = document.createElement('input');
+  el.type = 'text'; el.value = value; el.placeholder = placeholder; el.maxLength = max;
+  return el;
+}
+
+function actButton(label, title, onClick, disabled = false) {
+  const b = document.createElement('button');
+  b.type = 'button'; b.className = 'act'; b.textContent = label; b.title = title; b.disabled = disabled;
+  b.addEventListener('click', onClick);
+  return b;
+}
+
+// The list as the rows show it right now, edits included.
+function appsFromRows() {
+  return [...$('apps').querySelectorAll('.app-row')].map((r) => {
+    const [name, path, args] = r.querySelectorAll('input');
+    return { name: name.value.trim(), path: path.value.trim(), args: args.value.trim() };
+  });
+}
+
+async function saveApps(list) {
+  if (list.some((a) => !a.name || !a.path)) { alertBox('Each app needs a name and something to open.'); return; }
+  appsShown = null;   // rebuild from what the companion saved
+  await save({ apps: list });
+}
+
+function renderApps(list) {
+  const box = $('apps');
+  $('app-add').disabled = list.length >= MAX_APPS;
+  // Don't rebuild under a text field being typed in; the next poll catches up. A focused
+  // button (↑ ↓ Remove) doesn't count: its row has to update right away, or the next
+  // click reads stale rows.
+  const a = document.activeElement;
+  if (a && a.tagName === 'INPUT' && box.contains(a)) return;
+  const key = JSON.stringify(list);
+  if (key === appsShown) return;
+  appsShown = key;
+  box.replaceChildren();
+  if (!list.length) {
+    const p = document.createElement('div');
+    p.className = 'empty'; p.textContent = 'No apps yet. Add one below.';
+    box.append(p);
+    return;
+  }
+  list.forEach((a, i) => {
+    const row = document.createElement('div');
+    row.className = 'app-row';
+    const inputs = [textInput(a.name, 'Name', 15), textInput(a.path, 'Path or URL', 512), textInput(a.args, 'Arguments', 512)];
+    for (const el of inputs) el.addEventListener('change', () => saveApps(appsFromRows()));
+    const move = (d) => () => {
+      const l = appsFromRows();
+      [l[i], l[i + d]] = [l[i + d], l[i]];
+      saveApps(l);
+    };
+    const btns = document.createElement('div');
+    btns.className = 'btns';
+    btns.append(
+      actButton('↑', 'Move up', move(-1), i === 0),
+      actButton('↓', 'Move down', move(1), i === list.length - 1),
+      actButton('Test', 'Open it now on this PC', async () => {
+        try { render(await api('/api/action', { action: 'launch', index: i })); }
+        catch (e) { alertBox(e.message); }
+      }),
+      actButton('Remove', 'Remove this tile', () => saveApps(appsFromRows().filter((_, j) => j !== i))),
+    );
+    row.append(...inputs, btns);
+    box.append(row);
+  });
+}
+
+$('app-add').addEventListener('click', () => {
+  const a = { name: $('app-name').value.trim(), path: $('app-path').value.trim(), args: $('app-args').value.trim() };
+  if (!a.name || !a.path) { alertBox('Give the app a name and something to open.'); return; }
+  const list = state ? state.config.apps : [];
+  if (list.length >= MAX_APPS) return;
+  for (const id of ['app-name', 'app-path', 'app-args']) $(id).value = '';
+  saveApps([...list, a]);
+});
 
 async function loadPorts() {
   const ports = await api('/api/ports');
@@ -296,7 +501,7 @@ for (const el of document.querySelectorAll('[data-key],[data-board]')) {
   if (el.type === 'range') {
     let t;
     el.addEventListener('input', () => {
-      $('brightness-v').textContent = el.value;
+      el.nextElementSibling.textContent = el.value;
       clearTimeout(t);
       t = setTimeout(() => save(patch(valueOf(el))), 120);   // live on the board while dragging
     });

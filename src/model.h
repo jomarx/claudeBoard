@@ -1,7 +1,7 @@
 #pragma once
 #include <Arduino.h>
 
-#define FW_VERSION "0.2.0"
+#define FW_VERSION "0.4.0"
 
 // How long without a usage frame before the status dot changes.
 #define STALE_AFTER_MS   (120UL * 1000UL)
@@ -33,6 +33,11 @@ struct UsageData {
 };
 
 enum class Fx : uint8_t { None = 0, Wipe = 1, Fade = 2 };
+enum class ClockStyle : uint8_t { Digital = 0, Analog = 1, Rings = 2, Flip = 3, Words = 4, Binary = 5 };
+#define CLOCK_STYLES 6
+// The RGB LED on the back: usage colour + alert pulses, alert pulses only, or dark.
+enum class LedMode : uint8_t { Off = 0, Usage = 1, Alerts = 2 };
+#define LED_MODES 3
 
 // Saved in NVS (settings.cpp); the companion can change every field with a cfg frame.
 struct Settings {
@@ -40,14 +45,18 @@ struct Settings {
   uint8_t alert1 = 80;
   uint8_t alert2 = 90;
   bool h24 = true;
-  uint8_t rot = 0;          // display rotation, 0 = portrait, 2 = portrait flipped
+  uint8_t rot = 0;          // display rotation, 0 portrait, 1 landscape, 2/3 flipped
   uint16_t cycle = 0;       // seconds between automatic page changes, 0 = off
   Fx fx = Fx::None;         // effect when the page changes
+  ClockStyle clock = ClockStyle::Digital;   // the clock screen's face
+  LedMode led = LedMode::Usage;             // what the back LED shows (led.cpp)
+  uint8_t ledLevel = 60;                    // its brightness, 0-255
   uint16_t dim = 120;       // seconds idle before dimming, 0 = never
 
   bool operator==(const Settings &o) const {
     return brightness == o.brightness && alert1 == o.alert1 && alert2 == o.alert2 && h24 == o.h24 &&
-           rot == o.rot && cycle == o.cycle && fx == o.fx && dim == o.dim;
+           rot == o.rot && cycle == o.cycle && fx == o.fx && dim == o.dim &&
+           clock == o.clock && led == o.led && ledLevel == o.ledLevel;
   }
   bool operator!=(const Settings &o) const { return !(*this == o); }
 };
@@ -67,3 +76,41 @@ extern UsageData g_usage;
 extern Settings g_settings;
 extern Clock g_clock;
 extern uint32_t g_lastFrameMs;   // millis() of the last usage frame, 0 = never
+
+// Launcher tiles, sent by the companion in an "apps" frame. Only the names live on the
+// board; tapping tile i sends a "launch" event with value i and the PC opens it.
+#define MAX_APPS 8
+struct AppEntry {
+  char name[16];
+};
+
+extern AppEntry g_apps[MAX_APPS];
+extern uint8_t g_appCount;
+
+// Current weather, sent by the companion (it fetches Open-Meteo for the place set on its
+// settings page). Temperatures in degrees C, wind in km/h.
+struct WeatherData {
+  bool valid = false;
+  char place[24] = "";
+  int16_t temp = 0, feels = 0, hi = 0, lo = 0;
+  uint8_t hum = 0;              // relative humidity %
+  uint16_t wind = 0;
+  int8_t rain = -1;             // today's chance of rain %, -1 = unknown
+  uint8_t code = 0;             // WMO weather code
+  bool day = true;
+  uint32_t at = 0;              // unix seconds of the observation, 0 = unknown
+};
+
+extern WeatherData g_weather;
+
+// What's playing on the PC, from the companion (Windows' media session: the same thing the
+// volume flyout shows). The board's buttons send media keys back; see the "media" event.
+enum class MediaState : uint8_t { None = 0, Stopped = 1, Paused = 2, Playing = 3 };
+struct MediaData {
+  MediaState state = MediaState::None;   // None = no media session on the PC
+  char app[16] = "";
+  char title[48] = "";
+  char artist[32] = "";
+};
+
+extern MediaData g_media;

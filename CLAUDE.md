@@ -5,6 +5,47 @@ Firmware in `src/` (PlatformIO, Arduino, TFT_eSPI configured in `platformio.ini`
 `companion/` (Node, packaged as `claudeBoard.exe`). Board and PC talk newline-delimited JSON over USB
 serial, documented in `src/protocol.h`. Change the protocol in both places at once.
 
+## Commands
+
+There is no test suite or linter; verification is building, flashing and looking at the board.
+
+```
+pio run                                        # build default env (e32r28t, touch)
+pio run -e e32n28t                             # no-touch variant (BOOT button only)
+pio run -e e32r28t -t upload --upload-port COM12
+pio device monitor                             # 115200; shows hello/cfg/ack/event JSON
+python tools/send_fake.py COM12 [--ramp]       # drive the board without the companion
+
+cd companion
+npm install
+node companion.js --dry-run --once             # print one usage frame, no board/UI (npm run dry)
+node companion.js --port COM12 --verbose       # run from source, log all board traffic
+npm run build:exe                              # pkg -> dist/claudeBoard.exe, then GUI-subsystem patch
+```
+
+## Architecture
+
+**Firmware** (`src/`): `main.cpp` owns all state and runs a single cooperative loop. Each pass
+`protocolPoll()` fills a `Requests` struct (what frames arrived) instead of acting directly;
+`loop()` then applies settings (diffing against `req.before`), handles screen jumps/previews,
+ticks alerts, dim and auto-cycle, polls `inputPoll()`, and finally calls `uiRender()` only if
+`dirty`. Globals `g_usage`/`g_settings`/`g_clock` live in `model.h`; the board has no RTC, so
+`Clock` is resynced from `now`/`tz` in every usage frame.
+- Views (`ui.h`): `Main`/`Today` are pageable (`PageCount`); `Alert` and `Back` are overlays.
+  `main.cpp` tracks `page` (underlying page) separately from `shown` (what's on the glass), and
+  transitions (`fx`) only animate page changes, never overlays.
+- Alert logic (thresholds, snooze, new-window detection, "you're back") is all in
+  `evaluateAlerts()` in `main.cpp`; a new 5-hour window is detected from the reset time moving
+  forward or usage dropping sharply.
+- User actions on the board (page, brightness, snooze, dismiss) go back to the PC as `event`
+  frames so the companion can save them in its config.
+
+**Companion** (`companion/src/`): `main.js` wires everything. `board.js` emits `ready` on the
+board's `hello`, after which main sends `cfg` then a usage frame; the board echoes `cfg`, which
+keeps the page in sync. `usage.js` `buildFrame()` combines the log scan of
+`~/.claude/projects/**/*.jsonl` with optional `--limits` data. Saved config is overridden by CLI
+flags until the setting is changed on the page (`effective()` in `main.js`).
+
 ## Hardware facts (from https://www.lcdwiki.com/2.8inch_ESP32-32E-7789)
 
 - LCD on HSPI: SCK 14, MOSI 13, MISO 12, CS 15, DC 2, RST tied to EN, **backlight GPIO 21** (high = on).
@@ -17,8 +58,9 @@ serial, documented in `src/protocol.h`. Change the protocol in both places at on
 
 - `companion.js` is only the entry point; the code is in `src/`: `main.js` (CLI flags, wiring, settings
   page handlers), `usage.js` (log scan, limits, frames), `board.js` (serial, reconnect, hello handshake),
-  `config.js` (defaults + validation, `%APPDATA%\claudeBoard\config.json`), `server.js`, `tray.js`,
-  `startup.js` (HKCU Run value), `log.js`. The page is `public/index.html` (no framework).
+  `config.js` (defaults + validation, `%APPDATA%\claudeBoard\config.json`), `server.js`, `tray.js`
+  (tray icon, window raising, media session and keys), `launcher.js`, `weather.js`, `media.js`, `text.js`
+  (ASCII for the board), `startup.js` (HKCU Run value), `log.js`. The page is `public/index.html` (no framework).
 - Keep it CommonJS: pkg bundles CommonJS reliably, ESM not.
 - Any new setting goes in `config.js` `normalize()` (all input passes through it), the page, and for
   board settings also `Settings` in `src/model.h`, `applyConfig`/`protocolSendSettings` and `settings.cpp`.
@@ -30,30 +72,49 @@ serial, documented in `src/protocol.h`. Change the protocol in both places at on
   `StreamReader` because `Console.In.ReadLineAsync` blocks in .NET Framework, and it exits when
   stdin closes, so it never outlives the companion.
 
-## Status
+## Status (0.4.0)
 
-- Display, screens, alerts, and the companion with `--limits` all work. The board is now on COM12
-  (CH340, 1a86:7523); COM3 is an unrelated CH9102 with the same vendor id, so auto-detect matches the PID.
-- Firmware 0.2.0: settings saved in NVS (`src/settings.cpp`), rotation 0/2 with touch flipped to match,
-  auto screen cycle, wipe/fade transitions, configurable dim, `preview` frames.
-- Companion 0.2.0 (`companion/src/`, CommonJS so pkg can bundle it): tray icon via a hidden PowerShell
-  NotifyIcon helper, settings page on 127.0.0.1:47820 (Host check + JSON-only POST), config in
-  `%APPDATA%\claudeBoard`, single instance via the UI port. `npm run build:exe` -> `dist/claudeBoard.exe`.
+- Firmware 0.4.0, companion 0.4.0. Seven screens in `View` (`src/ui.h`): Main, Today, Clock, Weather, Media,
+  Calendar, Launcher, plus the Alert and Back overlays. Each pageable screen has a nav bar (prev, next, page
+  dots, play/pause of the auto page change); tap targets come from `uiHitTest` (`ui.cpp`), actions from
+  `handleTap` (`main.cpp`). Text that may not fit goes through `fitText` (`ui.cpp`).
+- Rotation 0-3; landscape has its own Main/Today/Weather/Media layouts; touch is calibrated in portrait
+  (2026-11-27: raw X mirrored, no swap) and remapped per rotation in `input.cpp`.
+- Clock: six styles (`ClockStyle` in `model.h`, `CLOCK_NAMES` in `protocol.cpp`, `CLOCK_STYLES` in
+  `config.js`), redrawn every second while shown; big digits are TFT_eSPI font 8.
+- Back RGB LED (`src/led.cpp`, PWM channels 1-3; the backlight is 0): usage colour, alert/back pulses,
+  blue pulse when offline; `led`/`ledlvl` board settings.
+- Weather: `companion/src/weather.js` fetches Open-Meteo every 15 min for `config.weather` (lat/lon from the
+  page's place search, `/api/geocode`); a `weather` frame goes out only when `weatherState.seq` moves, and a
+  fetch's answer is dropped if the place changed while it was out.
+- Media: the tray helper polls Windows' media session (WinRT `GlobalSystemMediaTransportControlsSessionManager`,
+  non-blocking via AsTask) and presses media keys (`key|<vk>`); `media.js` builds the `media` frame and maps
+  the board's `media` event (MediaKey in `ui.h`) to key codes. Board text goes through `text.js` `ascii()`.
+- Launcher: tiles live in the companion config (`apps`); the board gets names only (`apps` frame) and sends a
+  `launch` event, which `launcher.js` opens (`.exe` spawned directly, anything else via the shell); the tray
+  helper then raises the app's window (`front|...`), since Windows won't let a background process do it.
+- Companion (CommonJS so pkg can bundle it): tray icon via a hidden PowerShell NotifyIcon helper, settings page
+  on 127.0.0.1:47820 (Host check + JSON-only POST), config in `%APPDATA%\claudeBoard`, single instance via the
+  UI port. It spots firmware without the 0.3+ screens by the `apps` flag in hello (kept as `screens`
+  in `board.js` state) and says so on the page.
+- The board's CH340 (1a86:7523) has shown up as COM12 and COM13 depending on the USB port; COM3 is an
+  unrelated CH9102 with the same vendor id. Auto-detect (`autoPort` in `board.js`) takes only the CH340.
 - `--limits` reads the `claude` CLI sign-in from `~/.claude/.credentials.json` and calls the undocumented
-  `api.anthropic.com/api/oauth/usage` endpoint. The token expires every few hours; running `claude` renews it.
-  The desktop app's sign-in is not in that file.
-- Claude credentials never go to the board.
-- Touch calibrated 2026-11-27 for portrait (raw X mirrored, no swap); `TOUCH_DEBUG` prints
-  `{"type":"touch",...}` per tap if it needs redoing.
-- Tested on the board: cfg echo, NVS surviving a reset, live settings from the page, reconnect.
-  Not yet checked by eye: wipe/fade on the glass, taps in the flipped orientation, the tray icon.
+  `api.anthropic.com/api/oauth/usage` endpoint; the token expires every few hours and running `claude`
+  renews it (the desktop app's sign-in is not in that file). Claude credentials never go to the board.
+- Every commit is reviewed by `.githooks/post-commit` (headless, read-only `claude -p`, results in `reviews/`,
+  git-ignored); enable per clone with `git config core.hooksPath .githooks`.
+- Debug switches `-DBOOT_SELFTEST=1` and `-DTOUCH_DEBUG=1` are commented out in `platformio.ini`.
+- Tested over serial on the board: every screen, style and state in portrait and landscape, cfg echo, NVS
+  across a reset, reconnect. Not yet checked by eye on the glass: the layouts, landscape taps, the media
+  keys acting on the PC, the LED colours, apps coming to the front, the tray icon.
 
 ## Next steps
 
-1. Check the transitions and the flipped-orientation taps by eye; tune the wipe strip size/delay in
-   `uiRender` (`src/ui.cpp`) if it looks slow or tears.
-2. Remove `-DBOOT_SELFTEST=1` (red/green/blue flash at boot) and `-DTOUCH_DEBUG=1` once happy.
-3. Exe icon/version resources (not set yet; editing resources after pkg can break its payload).
+1. Check the items above on the glass; tune layouts in `ui.cpp` (geometry is in small `*Geo` functions or
+   at the top of each `draw*`), and the wipe strip size/delay in `uiRender` if it looks slow or tears.
+2. Exe icon/version resources (not set yet; editing resources after pkg can break its payload).
+3. Ideas not started: degrees F / mph for weather, alert beeps on the unused speaker (amp enable GPIO 4).
 
 ## Build notes (Windows)
 

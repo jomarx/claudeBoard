@@ -40,7 +40,7 @@ puts an icon in the tray (green = live, amber = waiting or a limits error, grey 
 opens the settings page the first time. Starting it again while it runs just opens the page.
 The tray menu has Open settings, Reconnect, Start with Windows and Quit.
 
-Settings page: serial port, update interval, orientation (portrait / flipped), brightness,
+Settings page: serial port, update interval, orientation (portrait or landscape, each normal or flipped), clock style, brightness,
 dim timeout, 12/24h clock, automatic screen change every N seconds, transition (none / wipe /
 fade), alert thresholds, real limits on/off, session budget, plan label, start with Windows.
 Changes apply to the board right away and are saved in `%APPDATA%\claudeBoard\config.json`;
@@ -94,17 +94,46 @@ alert screen and the "you're back" screen without waiting for real usage.
 
 ## Controls
 
+Seven screens: **Main** (gauges), **Today** (daily detail), **Clock** (digital, analog, rings, flip, words or binary, picked
+under "Clock style" on the settings page), **Weather** (current conditions for a place you
+pick on the settings page), **Media** (what's playing on the PC, with previous / play-pause /
+next and volume buttons), **Calendar** (this month, today
+circled) and **Apps** (a launcher). Each has a bar along the bottom: previous, next, the page
+dots, and play/pause for the automatic screen change.
+
 | Input | Normal screens | Alert screen |
 |---|---|---|
-| Tap / BOOT button | next screen | tap a button / BOOT dismisses |
+| Tap the bar | previous / next screen, play / pause | - |
+| Tap elsewhere | Main, Today: next screen. Calendar: month title left / middle / right = previous month / this month / next month. Apps: opens that tile on the PC | tap a button |
+| BOOT button | next screen | dismiss |
 | Long press (touch or BOOT) | cycle brightness | - |
+
+The Media screen shows what Windows' own media flyout shows (Spotify, a browser tab, VLC...)
+and its buttons press the PC's media keys, so they control whatever is playing; no setup.
+It needs the tray helper, so not with `--no-tray`.
+
+The RGB LED on the back is a status light ("Back LED" on the settings page): green, amber or red
+with the 5-hour usage like the gauge, a red pulse while a limit alert is up, a green pulse when
+the limit resets, a slow blue pulse when no data arrives from the PC, and a white blink when you
+tap a launcher tile. "Alerts only" keeps it dark except for the pulses; it dims with the screen.
+
+Weather comes from [Open-Meteo](https://open-meteo.com) (free, no account): search a place in the
+settings page's Weather section and pick it. The companion fetches it every 15 minutes and only
+sends that place's coordinates; the board never goes online. The condition turns amber when the
+reading is over 3 hours old.
+
+The launcher's tiles are set on the settings page (Launcher section, up to 8): a name for the
+board and what to open, which is a program (`.exe`, with optional arguments), or a file,
+folder or URL. The board only gets the names; tapping a tile asks the companion to open it,
+so the PC side decides what runs. Each row has a Test button.
 
 Screen dims after 2 minutes idle; the first touch only wakes it. Alerts fire at 80%, 90%
 and 100% of the 5-hour limit. A higher threshold breaks through a snooze. When a window that
 hit 100% resets, a "You're back" screen shows.
 
 With "change screen every N seconds" set, the board pages by itself after N seconds without a
-touch; it never pages away from an alert. The transition (none, wipe, fade) applies to every
+touch; it never pages away from an alert. The play/pause button stops and restarts that until
+the setting changes or the board restarts; with the setting at 0, play pages every 10 seconds. The transition (none, wipe, fade) applies to every
 page change, tapped or automatic; alerts always appear at once.
 
 All of these are set on the companion's settings page and saved on the board, so it keeps them
@@ -112,13 +141,14 @@ when the PC is off. A long press still cycles brightness, and the companion save
 
 ## If something looks wrong on first boot
 
-- The board flashes red, green, blue at boot while `-DBOOT_SELFTEST` is set; remove it once you are happy.
-- Touch prints `{"type":"touch",...}` lines over serial while `-DTOUCH_DEBUG` is set, for calibration.
+- Blank or garbled screen: uncomment `-DBOOT_SELFTEST=1` in `platformio.ini`; the board then flashes red,
+  green, blue at boot, which tells a panel problem apart from a drawing one.
+- Taps off target: uncomment `-DTOUCH_DEBUG=1`; every tap then prints `{"type":"touch",...}` over serial.
 
 - Colours inverted: change `-DTFT_INVERSION_OFF` to `-DTFT_INVERSION_ON` in `platformio.ini`.
 - Red and blue swapped: change `TFT_RGB_ORDER` to `TFT_BGR`.
 - Garbled or blank picture: the panel may actually be an ILI9341; swap `-DST7789_DRIVER` for `-DILI9341_2_DRIVER`.
-- Upside down: pick "Portrait flipped" on the companion's settings page (touch follows).
+- Upside down or sideways: pick the orientation on the companion's settings page (touch follows).
 - Taps land in the wrong place: add `-DTOUCH_SWAP_XY`, `-DTOUCH_INVERT_X` or `-DTOUCH_INVERT_Y`,
   or tune `TOUCH_X_MIN/MAX`, `TOUCH_Y_MIN/MAX`. The values in `platformio.ini` are calibrated for
-  portrait (rotation 0); the flipped orientation mirrors them in code, so calibrate in portrait.
+  portrait (rotation 0); the other orientations are derived from them in code, so calibrate in portrait.
