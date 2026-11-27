@@ -5,6 +5,7 @@
 const { log } = require('./log');
 
 const REFRESH_MS = 15 * 60 * 1000;
+const RETRY_MS = 2 * 60 * 1000;     // after a failed fetch
 const TIMEOUT_MS = 10000;
 
 // seq goes up every time new data (or a cleared location) should reach the board.
@@ -32,7 +33,13 @@ async function refreshWeather(cfg, force = false) {
     return;
   }
   if (!force && key === weatherState.key && Date.now() - weatherState.at < REFRESH_MS) return;
-  weatherState.at = Date.now();   // also spaces out retries after an error
+  if (key !== weatherState.key) {
+    // A new place: the old reading must not be shown under the new name, even if this
+    // fetch fails, so drop it now (and let the board know).
+    weatherState.data = null;
+    weatherState.seq++;
+  }
+  weatherState.at = Date.now();
   weatherState.key = key;
   const q = new URLSearchParams({
     latitude: String(w.lat), longitude: String(w.lon), timezone: 'auto', forecast_days: '1',
@@ -64,6 +71,8 @@ async function refreshWeather(cfg, force = false) {
     const msg = e.name === 'TimeoutError' ? 'weather request timed out' : e.message;
     if (msg !== weatherState.error) log('weather:', msg);
     weatherState.error = msg;
+    // Try again in 2 minutes rather than waiting out the full 15.
+    weatherState.at = Date.now() - REFRESH_MS + RETRY_MS;
   }
 }
 

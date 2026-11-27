@@ -118,8 +118,6 @@ static void fmtTokens(char *out, size_t n, uint64_t v) {
 // ---------- shared pieces ----------
 
 static void header(const char *left, uint16_t bg) {
-  g.text(left, 12, 6, 2, C_MUTED, bg);
-
   uint16_t dot = C_DIM;
   const char *state = "no data";
   if (g_lastFrameMs) {
@@ -139,6 +137,17 @@ static void header(const char *left, uint16_t bg) {
   int w = g.width(right, 2);
   g.text(right, W - 12, 6, 2, C_TEXT, bg, TR_DATUM);
   g.circle(W - 12 - w - 8, 13, 3, dot);
+
+  // The left label gets whatever room the status leaves (a place name can be long):
+  // shortened with ".." rather than drawn over the dot.
+  const int room = W - 12 - w - 8 - 3 - 8 - 12;
+  char l[32];
+  strlcpy(l, left, sizeof l);
+  if (g.width(l, 2) > room) {
+    for (int len = strlen(l); len > 0 && g.width(l, 2) + g.width("..", 2) > room;) l[--len] = 0;
+    strlcat(l, "..", sizeof l);
+  }
+  g.text(l, 12, 6, 2, C_MUTED, bg);
 }
 
 // ---------- nav bar: [<] [>]  page dots  [play/pause] ----------
@@ -832,7 +841,9 @@ static void drawWeather() {
     skyIcon(sky, 80, 104);
     const int x = 160;
     textDeg(temp, x, 34, 6, C_TEXT, false);
-    g.text(desc, x, 90, 4, descColor, C_BG);
+    // "Snow showers" is 163 px in font 4, more than the 148 px column; fall back to font 2.
+    const bool big = g.width(desc, 4) <= W - 12 - x;
+    g.text(desc, x, big ? 90 : 96, big ? 4 : 2, descColor, C_BG);
     // The column is narrow: one detail per line.
     char a[24], b[24];
     snprintf(a, sizeof a, "feels %d`  %u%%", w.feels, w.hum);
