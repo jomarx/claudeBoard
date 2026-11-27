@@ -102,5 +102,7 @@ void protocolPoll(Requests &req);
 void protocolHandleLine(const char *line, Requests &req, Link link);
 void protocolSendHello(Print &out, bool overWifi);
 void protocolSendSettings(Print &out);
+// The board's network state (the net reply); also sent unasked over USB when setup opens or closes.
+void protocolSendNet(Print &out);
 // Goes to the Sync link: Wi-Fi when that's chosen and connected, else USB.
 void protocolSendEvent(const char *name, int value);

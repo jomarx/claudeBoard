@@ -362,6 +362,7 @@ async function run() {
           // Opens Wi-Fi setup on the plugged-in board (its own network and page), as BOOT held 5 s does.
           if (!usbBoard.state.connected) throw new Error('plug the board in over USB first');
           const open = body.open !== false;
+          usbBoard.status({ net: null });   // only a report from after this request counts
           usbBoard.send({ type: 'setup', open });
           await new Promise((r) => setTimeout(r, 400));
           usbBoard.send({ type: 'net' });

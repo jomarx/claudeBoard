@@ -64,7 +64,7 @@ static void sendErr(Print &out, const char *msg) {
 }
 
 // The board's network state. The password and the token never leave the board.
-static void sendNet(Print &out) {
+void protocolSendNet(Print &out) {
   const NetSettings &n = netSettings();
   JsonDocument d;
   d["type"] = "net";
@@ -117,7 +117,7 @@ static bool applyWifi(Print &out, JsonObjectConst d, Link link) {
     return false;
   }
   netSave(n);
-  sendNet(out);
+  protocolSendNet(out);
   return true;
 }
 
@@ -301,7 +301,7 @@ void protocolHandleLine(const char *line, Requests &req, Link link) {
     return;
   }
   if (!strcmp(type, "net")) {
-    sendNet(out);
+    protocolSendNet(out);
     return;
   }
   if (!strcmp(type, "setup")) {

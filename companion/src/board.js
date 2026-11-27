@@ -70,7 +70,9 @@ class BoardLink extends EventEmitter {
         const isReply = Date.now() - (this.helloAskedAt || 0) < 4000;
         // "apps" in hello = firmware 0.3+ (screens, relative steps, launcher, rotation 0-3);
         // "net" = 0.5+ (Wi-Fi sync, the wifi and net messages).
-        this.status({ fw: m.fw, cfgCapable: !!m.cfg, screens: !!m.apps, netCapable: !!m.net });
+        // net: null drops any earlier net report: after a restart (e.g. a save on the setup
+        // page) it no longer describes the board.
+        this.status({ fw: m.fw, cfgCapable: !!m.cfg, screens: !!m.apps, netCapable: !!m.net, net: null });
         // Sync was chosen on the board's own setup page: let main adopt it before 'ready'
         // sends our settings back, or they would undo it.
         if (m.syncFromBoard === 'wifi' || m.syncFromBoard === 'usb') this.emit('syncFromBoard', m.syncFromBoard);

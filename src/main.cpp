@@ -199,28 +199,32 @@ static void handleTap(int x, int y) {
 
 // ---------- Wi-Fi setup on the board (portal.cpp) ----------
 
+// Both tell a companion on USB right away (an unasked net report), so its page never shows
+// a setup network that is already gone, whatever closed it: Cancel, BOOT, or the page.
 static void openSetup() {
   portalStart();
   wake();
   show(View::Setup);
+  protocolSendNet(Serial);
 }
 
 static void closeSetup() {
   portalStop();
   if (shown == View::Setup) showPage();
+  protocolSendNet(Serial);
 }
 
 static void handleInput(const InputEvent &ev) {
   if (ev.kind == InputKind::None) return;
-  bool wasDim = dimmed;
-  wake();
-  if (wasDim) return;  // the first touch only wakes the screen
-
-  // BOOT held 5 s: Wi-Fi setup, from any screen. Nothing is erased; Cancel just closes it.
+  // BOOT held 5 s: Wi-Fi setup, from any screen, dimmed or not (a deliberate 5 s hold is
+  // never just a wake-up). Nothing is erased; Cancel just closes it.
   if (ev.kind == InputKind::ButtonHold) {
     openSetup();
     return;
   }
+  bool wasDim = dimmed;
+  wake();
+  if (wasDim) return;  // the first touch only wakes the screen
 
   switch (shown) {
     case View::Setup:
