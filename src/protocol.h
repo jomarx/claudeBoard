@@ -26,8 +26,8 @@
 //       Every field is optional; {"type":"cfg"} alone just asks for the current values.
 //       Settings are saved on the board and survive a reboot.
 //   {"type":"screen","n":0}                            -> jump to a screen: 0 main, 1 today,
-//                                                         2 clock, 3 weather, 4 calendar,
-//                                                         5 launcher
+//                                                         2 clock, 3 weather, 4 media,
+//                                                         5 calendar, 6 launcher (View in ui.h)
 //   {"type":"screen","step":1}                         -> next (1) or previous (-1) screen
 //   {"type":"apps","list":["Outlook","Chrome"]}        -> launcher tile names, at most 8,
 //       15 printable ASCII chars each; the list replaces the previous one. The board

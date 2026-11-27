@@ -117,6 +117,14 @@ static void fmtTokens(char *out, size_t n, uint64_t v) {
 
 // ---------- shared pieces ----------
 
+// Shortens s in place until it fits room pixels in this font, ending it with "..".
+static void fitText(char *s, size_t n, int font, int room) {
+  if (g.width(s, font) <= room) return;
+  const int dots = g.width("..", font);
+  for (int len = strlen(s); len > 0 && g.width(s, font) + dots > room;) s[--len] = 0;
+  strlcat(s, "..", n);
+}
+
 static void header(const char *left, uint16_t bg) {
   uint16_t dot = C_DIM;
   const char *state = "no data";
@@ -143,10 +151,7 @@ static void header(const char *left, uint16_t bg) {
   const int room = W - 12 - w - 8 - 3 - 8 - 12;
   char l[32];
   strlcpy(l, left, sizeof l);
-  if (g.width(l, 2) > room) {
-    for (int len = strlen(l); len > 0 && g.width(l, 2) + g.width("..", 2) > room;) l[--len] = 0;
-    strlcat(l, "..", sizeof l);
-  }
+  fitText(l, sizeof l, 2, room);
   g.text(l, 12, 6, 2, C_MUTED, bg);
 }
 
@@ -419,11 +424,10 @@ static void drawTodayLand() {
   const int x0 = 214, x1 = W - 12;
   int y = 34;
   for (int i = 0; i < u.modelCount; i++) {
-    char p[8], n[sizeof u.models[i].name];
+    char p[8], n[sizeof u.models[i].name + 3];   // room for ".."
     snprintf(p, sizeof p, "%u%%", u.models[i].pct);
     strlcpy(n, u.models[i].name, sizeof n);
-    int room = x1 - x0 - g.width(p, 2) - 6;
-    for (int len = strlen(n); len > 0 && g.width(n, 2) > room;) n[--len] = 0;
+    fitText(n, sizeof n, 2, x1 - x0 - g.width(p, 2) - 6);
     g.text(n, x0, y, 2, C_MUTED, C_BG);
     g.text(p, x1, y, 2, C_TEXT, C_BG, TR_DATUM);
     y += 26;
@@ -887,29 +891,27 @@ static MediaGeo mediaGeo() {
 }
 static int volX(const MediaGeo &m, int i) { return 12 + i * (m.volW + m.volGap); }
 
-// Up to two lines of font 4, broken at a space; the second line shortened with "..".
+// Up to two lines of font 4: broken at the last space that fits, or mid-word when the first
+// word alone is too wide; the second line shortened with "..". Both lines fit W - 24.
 static int wrapTitle(const char *s, int y, uint16_t c) {
   const int room = W - 24;
   char a[48], b[48];
   strlcpy(a, s, sizeof a);
   b[0] = 0;
   if (g.width(a, 4) > room) {
-    // Longest prefix that fits and ends at a space; the rest goes to line two.
-    int cut = -1;
+    int cut = -1;      // last space whose prefix fits
+    int fits = 0;      // longest prefix that fits at all, for the no-space case
     for (int i = 1; a[i]; i++) {
-      if (a[i] != ' ') continue;
       char t[48];
       strlcpy(t, a, i + 1);
       if (g.width(t, 4) > room) break;
-      cut = i;
+      fits = i;
+      if (a[i] == ' ') cut = i;
     }
-    if (cut < 0) cut = strlen(a) / 2;   // one long word: split it anyway
+    if (cut < 0) cut = max(fits, 1);
     strlcpy(b, a + cut + (a[cut] == ' '), sizeof b);
     a[cut] = 0;
-    if (g.width(b, 4) > room) {
-      for (int len = strlen(b); len > 0 && g.width(b, 4) + g.width("..", 4) > room;) b[--len] = 0;
-      strlcat(b, "..", sizeof b);
-    }
+    fitText(b, sizeof b, 4, room);
   }
   g.text(a, W / 2, y, 4, c, C_BG, TC_DATUM);
   if (!b[0]) return 1;
@@ -932,17 +934,19 @@ static void drawMedia() {
   if (land) {
     char t[48];
     strlcpy(t, title, sizeof t);
-    if (g.width(t, 4) > W - 24) {
-      for (int len = strlen(t); len > 0 && g.width(t, 4) + g.width("..", 4) > W - 24;) t[--len] = 0;
-      strlcat(t, "..", sizeof t);
-    }
+    fitText(t, sizeof t, 4, W - 24);
     g.text(t, W / 2, geo.titleY, 4, none ? C_MUTED : C_TEXT, C_BG, TC_DATUM);
   } else {
     lines = wrapTitle(title, geo.titleY, none ? C_MUTED : C_TEXT);
   }
   const char *sub = none ? "Play something on the PC" : m.artist;
   const int subY = land ? geo.artistY : geo.titleY + lines * 26 + 8;
-  if (sub[0]) g.text(sub, W / 2, subY, 2, C_MUTED, C_BG, TC_DATUM);
+  if (sub[0]) {
+    char a[sizeof m.artist + 4];
+    strlcpy(a, sub, sizeof a);
+    fitText(a, sizeof a, 2, W - 24);   // multi-artist credits easily pass 240 px
+    g.text(a, W / 2, subY, 2, C_MUTED, C_BG, TC_DATUM);
+  }
   if (m.state == MediaState::Paused || m.state == MediaState::Stopped)
     g.text(m.state == MediaState::Paused ? "paused" : "stopped", W / 2, subY + 18, 2, C_AMBER, C_BG, TC_DATUM);
 
@@ -1109,9 +1113,9 @@ static void drawLauncher() {
     char letter[2] = {(char)toupper((unsigned char)g_apps[i].name[0]), 0};
     g.text(letter, cx, cy + 1, land ? 4 : 2, C_BG, disc, MC_DATUM);
 
-    char name[sizeof g_apps[i].name];
+    char name[sizeof g_apps[i].name + 3];   // room for ".."
     strlcpy(name, g_apps[i].name, sizeof name);
-    for (int len = strlen(name); len > 0 && g.width(name, 2) > w - 8;) name[--len] = 0;
+    fitText(name, sizeof name, 2, w - 8);
     g.text(name, cx, y + h - 19, 2, C_TEXT, bg, TC_DATUM);
   }
   navBar((int)View::Launcher);
