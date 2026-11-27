@@ -341,7 +341,7 @@ void uiBegin() {
   uiSetBrightness(g_settings.brightness);
 
   tft.init();
-  tft.setRotation(0);  // portrait, USB at the bottom on most units; use 2 to flip
+  uiSetRotation(g_settings.rot);  // 0 = portrait, 2 = flipped; set from the companion
 
 #ifdef BOOT_SELFTEST
   // Direct draws, no sprite: tells a panel-init problem apart from a sprite problem.
@@ -365,25 +365,62 @@ void uiBegin() {
                 (unsigned)freeBefore, (unsigned)largest, depth);
 }
 
-void uiSetBrightness(uint8_t level) {
+static uint8_t level = 0;   // backlight level the rest of the firmware asked for
+
+static void backlight(uint8_t l) {
 #if ESP_ARDUINO_VERSION_MAJOR >= 3
-  ledcWrite(TFT_BL, level);
+  ledcWrite(TFT_BL, l);
 #else
-  ledcWrite(0, level);
+  ledcWrite(0, l);
 #endif
 }
 
-void uiRender(View v, const AlertInfo &alert) {
-  for (int band = 0; band < H; band += BAND) {
-    g.y0 = band;
-    switch (v) {
-      case View::Alert: drawAlert(alert); break;
-      case View::Back: drawBack(); break;
-      case View::Today: g_usage.valid ? drawToday() : drawWaiting(); break;
-      default: g_usage.valid ? drawMain() : drawWaiting(); break;
-    }
-    spr.pushSprite(0, band);
+void uiSetBrightness(uint8_t l) {
+  level = l;
+  backlight(l);
+}
+
+void uiSetRotation(uint8_t rot) {
+  tft.setRotation(rot == 2 ? 2 : 0);
+}
+
+static void drawBand(View v, const AlertInfo &alert, int band) {
+  g.y0 = band;
+  switch (v) {
+    case View::Alert: drawAlert(alert); break;
+    case View::Back: drawBack(); break;
+    case View::Today: g_usage.valid ? drawToday() : drawWaiting(); break;
+    default: g_usage.valid ? drawMain() : drawWaiting(); break;
   }
+}
+
+static void fadeBacklight(bool down) {
+  const int STEPS = 8;
+  for (int i = 1; i <= STEPS; i++) {
+    int k = down ? STEPS - i : i;
+    backlight(level * k / STEPS);
+    delay(14);
+  }
+}
+
+void uiRender(View v, const AlertInfo &alert, Fx fx) {
+  if (fx == Fx::Fade) fadeBacklight(true);
+
+  for (int band = 0; band < H; band += BAND) {
+    drawBand(v, alert, band);
+    if (fx == Fx::Wipe) {
+      // Reveal the new screen top to bottom in strips from the already drawn band.
+      const int STRIP = 16;
+      for (int sy = 0; sy < BAND; sy += STRIP) {
+        spr.pushSprite(0, band + sy, 0, sy, W, STRIP);
+        delay(9);
+      }
+    } else {
+      spr.pushSprite(0, band);
+    }
+  }
+
+  if (fx == Fx::Fade) fadeBacklight(false);
 }
 
 int uiAlertButtonAt(int x, int y) {

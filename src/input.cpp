@@ -1,6 +1,7 @@
 #include "input.h"
+#include "model.h"
 
-static const int BOOT_PIN = 0;
+static const int BOOT_BTN_PIN = 0;
 static const uint32_t LONG_MS = 700;
 static const uint32_t DEBOUNCE_MS = 30;
 
@@ -62,6 +63,11 @@ static bool touchRead(int &x, int &y) {
 #ifdef TOUCH_INVERT_Y
   y = 319 - y;
 #endif
+  // The calibration above is for rotation 0; a flipped screen turns touch around too.
+  if (g_settings.rot == 2) {
+    x = 239 - x;
+    y = 319 - y;
+  }
   x = constrain(x, 0, 239);
   y = constrain(y, 0, 319);
 #ifdef TOUCH_DEBUG
@@ -89,7 +95,7 @@ static bool bDown = false, bLongSent = false;
 static uint32_t bStart = 0;
 
 void inputBegin() {
-  pinMode(BOOT_PIN, INPUT_PULLUP);
+  pinMode(BOOT_BTN_PIN, INPUT_PULLUP);
   touchBegin();
 }
 
@@ -100,7 +106,7 @@ InputEvent inputPoll() {
   // BOOT button. Opening the serial port pulses GPIO0 through the auto-reset
   // circuit, so ignore it until it has been seen released after boot.
   static bool bArmed = false;
-  bool pressed = digitalRead(BOOT_PIN) == LOW;
+  bool pressed = digitalRead(BOOT_BTN_PIN) == LOW;
   if (!bArmed) {
     if (!pressed && now > 1500) bArmed = true;
     pressed = false;

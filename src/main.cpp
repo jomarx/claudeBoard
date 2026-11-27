@@ -7,6 +7,7 @@
 #include "protocol.h"
 #include "ui.h"
 #include "input.h"
+#include "settings.h"
 
 UsageData g_usage;
 Settings g_settings;
@@ -17,6 +18,8 @@ static View page = View::Main;      // the pageable screen underneath any overla
 static View shown = View::Main;     // what is on the glass right now
 static AlertInfo alert;
 static bool dirty = true;
+static bool pageChanged = false;    // the next render is a page change, so it may animate
+static uint32_t lastPageMs = 0;     // when the page last changed, for auto-cycle
 
 // ---------- alerts ----------
 
@@ -28,7 +31,7 @@ static bool snoozed = false;
 static uint32_t backShownMs = 0;
 
 static void show(View v) {
-  if (v != shown) { shown = v; dirty = true; }
+  if (v != shown) { shown = v; dirty = true; pageChanged = true; }
 }
 
 static void showPage() { show(page); }
@@ -88,7 +91,6 @@ static void tickAlerts() {
 
 // ---------- brightness / idle dim ----------
 
-static const uint32_t DIM_AFTER_MS = 120000;
 static uint32_t lastActivityMs = 0;
 static bool dimmed = false;
 
@@ -102,7 +104,8 @@ static void wake() {
 
 static void tickDim() {
   if (shown == View::Alert || shown == View::Back) return;  // never dim an alert
-  if (!dimmed && millis() - lastActivityMs > DIM_AFTER_MS) {
+  if (g_settings.dim == 0) return;
+  if (!dimmed && millis() - lastActivityMs > g_settings.dim * 1000UL) {
     dimmed = true;
     uiSetBrightness(max<uint8_t>(g_settings.brightness / 5, 4));
   }
@@ -114,15 +117,24 @@ static void cycleBrightness() {
   while (i < 4 && steps[i] <= g_settings.brightness) i++;
   g_settings.brightness = steps[i % 4];
   uiSetBrightness(g_settings.brightness);
+  settingsSave();
   protocolSendEvent("brightness", g_settings.brightness);
 }
 
 // ---------- input ----------
 
-static void nextPage() {
+static void nextPage(bool report = true) {
   page = (View)(((int)page + 1) % (int)View::PageCount);
+  lastPageMs = millis();
   showPage();
-  protocolSendEvent("screen", (int)page);
+  if (report) protocolSendEvent("screen", (int)page);
+}
+
+// Auto-cycle: only between normal pages, never away from an alert.
+static void tickCycle() {
+  if (g_settings.cycle == 0 || shown != page) return;
+  uint32_t since = millis() - max(lastPageMs, lastActivityMs);
+  if (since >= g_settings.cycle * 1000UL) nextPage(false);
 }
 
 static void handleInput(const InputEvent &ev) {
@@ -170,12 +182,15 @@ void setup() {
   digitalWrite(4, HIGH);
 
   protocolBegin();
+  settingsLoad();
   uiBegin();
   inputBegin();
   lastActivityMs = millis();
   uiRender(shown, alert);
   dirty = false;
+  pageChanged = false;
   protocolSendHello();
+  protocolSendSettings();
 }
 
 // Things on screen that change with time alone: the minute, and live/stale/offline.
@@ -188,31 +203,50 @@ static uint32_t timeSignature() {
   return sig;
 }
 
+static void applySettings(const Settings &before) {
+  const Settings &s = g_settings;
+  if (s.rot != before.rot) uiSetRotation(s.rot);
+  if (s.dim != before.dim || s.brightness != before.brightness) {
+    // A new timeout or level shows at full brightness right away.
+    dimmed = false;
+    lastActivityMs = millis();
+    uiSetBrightness(s.brightness);
+  }
+  if (s.cycle != before.cycle) lastPageMs = millis();
+  settingsSave();
+}
+
 void loop() {
-  int screenReq = -1;
-  switch (protocolPoll(screenReq)) {
-    case FrameResult::Usage:
-      evaluateAlerts();
-      dirty = true;
-      break;
-    case FrameResult::Config:
-      if (!dimmed) uiSetBrightness(g_settings.brightness);
-      evaluateAlerts();
-      dirty = true;
-      break;
-    case FrameResult::Screen:
-      if (screenReq >= 0 && screenReq < (int)View::PageCount) {
-        page = (View)screenReq;
-        wake();
-        showPage();
-      }
-      break;
-    default:
-      break;
+  Requests req;
+  protocolPoll(req);
+  if (req.config) {
+    applySettings(req.before);
+    dirty = true;
+  }
+  if (req.usage || req.config) {
+    evaluateAlerts();
+    dirty = true;
+  }
+  if (req.screen >= 0 && req.screen < (int)View::PageCount) {
+    page = (View)req.screen;
+    lastPageMs = millis();
+    wake();
+    showPage();
+  }
+  if (req.preview == 0) {
+    alert.pct = g_usage.sessionPct >= 0 ? g_usage.sessionPct : g_settings.alert2;
+    alert.reached = alert.pct >= 100;
+    wake();
+    show(View::Alert);
+  } else if (req.preview == 1) {
+    backShownMs = millis();
+    wake();
+    show(View::Back);
   }
 
   handleInput(inputPoll());
   tickAlerts();
+  tickCycle();
   tickDim();
 
   static uint32_t lastSig = 0;
@@ -220,8 +254,11 @@ void loop() {
   if (sig != lastSig) { lastSig = sig; dirty = true; }
 
   if (dirty) {
+    // Animate only between normal pages; alerts and their overlays appear at once.
+    bool animate = pageChanged && shown == page;
     dirty = false;
-    uiRender(shown, alert);
+    pageChanged = false;
+    uiRender(shown, alert, animate ? g_settings.fx : Fx::None);
   }
   delay(10);
 }

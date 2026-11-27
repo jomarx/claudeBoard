@@ -12,7 +12,17 @@ void protocolBegin() {
 }
 
 void protocolSendHello() {
-  Serial.printf("{\"type\":\"hello\",\"fw\":\"%s\",\"w\":240,\"h\":320}\n", FW_VERSION);
+  Serial.printf("{\"type\":\"hello\",\"fw\":\"%s\",\"w\":240,\"h\":320,\"cfg\":true}\n", FW_VERSION);
+}
+
+static const char *FX_NAMES[] = {"none", "wipe", "fade"};
+
+void protocolSendSettings() {
+  const Settings &s = g_settings;
+  Serial.printf("{\"type\":\"cfg\",\"brightness\":%u,\"alert1\":%u,\"alert2\":%u,\"h24\":%s,"
+                "\"rot\":%u,\"cycle\":%u,\"fx\":\"%s\",\"dim\":%u}\n",
+                s.brightness, s.alert1, s.alert2, s.h24 ? "true" : "false",
+                s.rot, s.cycle, FX_NAMES[(int)s.fx], s.dim);
 }
 
 void protocolSendEvent(const char *name, int value) {
@@ -79,45 +89,62 @@ static void applyConfig(JsonObjectConst d) {
   if (d["alert1"].is<int>()) g_settings.alert1 = constrain(d["alert1"].as<int>(), 1, 100);
   if (d["alert2"].is<int>()) g_settings.alert2 = constrain(d["alert2"].as<int>(), 1, 100);
   if (d["h24"].is<bool>()) g_settings.h24 = d["h24"];
+  if (d["rot"].is<int>()) g_settings.rot = d["rot"].as<int>() == 2 ? 2 : 0;
+  if (d["cycle"].is<int>()) g_settings.cycle = constrain(d["cycle"].as<int>(), 0, 3600);
+  if (d["dim"].is<int>()) g_settings.dim = constrain(d["dim"].as<int>(), 0, 3600);
+  const char *fx = d["fx"];
+  if (fx) {
+    for (int i = 0; i < 3; i++)
+      if (!strcmp(fx, FX_NAMES[i])) g_settings.fx = (Fx)i;
+  }
 }
 
-static FrameResult handleLine(const char *line, int &screenRequest) {
+static void handleLine(const char *line, Requests &req) {
   JsonDocument doc;
   DeserializationError e = deserializeJson(doc, line);
   if (e) {
     sendErr(e.c_str());
-    return FrameResult::Other;
+    return;
   }
   const char *type = doc["type"] | "";
 
   if (!strcmp(type, "usage")) {
     applyUsage(doc.as<JsonObjectConst>());
     Serial.printf("{\"type\":\"ack\",\"seq\":%lu}\n", (unsigned long)(doc["seq"] | 0UL));
-    return FrameResult::Usage;
+    req.usage = true;
+    return;
   }
   if (!strcmp(type, "cfg")) {
+    if (!req.config) req.before = g_settings;
     applyConfig(doc.as<JsonObjectConst>());
-    Serial.println("{\"type\":\"ack\",\"cfg\":true}");
-    return FrameResult::Config;
+    req.config = true;
+    protocolSendSettings();
+    return;
   }
   if (!strcmp(type, "screen")) {
-    screenRequest = doc["n"] | 0;
-    return FrameResult::Screen;
+    req.screen = doc["n"] | 0;
+    return;
+  }
+  if (!strcmp(type, "preview")) {
+    const char *v = doc["view"] | "";
+    if (!strcmp(v, "alert")) req.preview = 0;
+    else if (!strcmp(v, "back")) req.preview = 1;
+    else sendErr("unknown view");
+    return;
   }
   if (!strcmp(type, "ping")) {
     Serial.println("{\"type\":\"pong\"}");
-    return FrameResult::Other;
+    return;
   }
   if (!strcmp(type, "hello")) {
     protocolSendHello();
-    return FrameResult::Other;
+    protocolSendSettings();
+    return;
   }
   sendErr("unknown type");
-  return FrameResult::Other;
 }
 
-FrameResult protocolPoll(int &screenRequest) {
-  FrameResult last = FrameResult::None;
+void protocolPoll(Requests &req) {
   while (Serial.available()) {
     char c = (char)Serial.read();
     if (c == '\r') continue;
@@ -126,8 +153,7 @@ FrameResult protocolPoll(int &screenRequest) {
         sendErr("line too long");
       } else if (lineLen > 0) {
         lineBuf[lineLen] = 0;
-        FrameResult r = handleLine(lineBuf, screenRequest);
-        if (r != FrameResult::Other || last == FrameResult::None) last = r;
+        handleLine(lineBuf, req);
       }
       lineLen = 0;
       overflow = false;
@@ -136,5 +162,4 @@ FrameResult protocolPoll(int &screenRequest) {
     if (lineLen < sizeof(lineBuf) - 1) lineBuf[lineLen++] = c;
     else overflow = true;
   }
-  return last;
 }
