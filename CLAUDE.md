@@ -134,27 +134,25 @@ flags until the setting is changed on the page (`effective()` in `main.js`).
 
 ## Next steps
 
-Where things stand (2026-11-27, moving from the work PC to a home PC): work is on branch `wifi-sync`,
-all pushed. The board is flashed with the current firmware (colour fix included) and every USB-mode
-item has been checked on the glass. Only Wi-Fi is untested.
+Where things stand (2026-11-27): `wifi-sync` is merged into `main`. The board is flashed with 0.5.0 and
+every USB-mode item has been checked on the glass. Wi-Fi sync tested on the home network 2026-11-27:
+settings sent from the page over USB, board at a fixed IP, pairing accepted, usage frames acked and taps
+sent as events over Wi-Fi, board on a phone charger with no USB, rejoins by itself after a power cut.
+Windows Firewall let the companion take inbound 47821 without a rule added by hand. It is the page's Send
+button that sends the Wi-Fi settings; the "Sync over" toggle alone leaves the board with whatever it had
+stored (it kept trying the work PC's test network until Send was pressed).
 
-Setting up the home PC: clone, `git checkout wifi-sync`, `git config core.hooksPath .githooks`,
-`cd companion && npm install`. The board's COM port will differ there (the CH340 is auto-detected; find
-it in Device Manager for `pio ... --upload-port`). The companion's config (`%APPDATA%\claudeBoard`) is
-per PC and is not in git. A fresh one starts from the `config.js` defaults, and the companion sends its
-`cfg` to the board on connect, so the board's saved settings get overwritten by those defaults. Set them
-back on the page: the work PC had rot 3 (landscape flipped), clock "dots", cycle 20 s, fx wipe, dim 120 s,
-brightness 5, LED off (ledlvl 247), alerts 80/90, 24 h, sync usb; plus the weather place and launcher
-apps (5 tiles, PC-specific paths). The board itself is fine as flashed; reflash only after firmware changes. See Build notes below if `pio` fails.
+New PC: clone, `git config core.hooksPath .githooks`, `cd companion && npm install`. The board's COM port
+differs per PC and USB port (the CH340 is auto-detected; Device Manager for `--upload-port`). The
+companion's config (`%APPDATA%\claudeBoard`) is per PC and not in git; a fresh one starts from the
+`config.js` defaults and its `cfg` overwrites the board's saved settings on connect. Set them back on the
+page: rot 3 (landscape flipped), clock "dots", cycle 20 s, fx wipe, dim 120 s, brightness 5, LED off
+(ledlvl 247), alerts 80/90, 24 h; plus the weather place and launcher apps (PC-specific paths). See
+Build notes below if `pio` fails.
 
-1. Test Wi-Fi sync on the real network (the setup form or the page), and the on-board setup from a phone;
-   the PC used so far has no Wi-Fi adapter, so neither was possible from it. The PC and the board must be
-   on the same network; allow inbound TCP 47821 (`lan.port`) in Windows Firewall for the companion. The
-   board connects to the companion over Wi-Fi, so leave the USB cable for power only, or test from a
-   phone charger. Without hardware: `node tools/fake_wifi_board.js host port token`.
+1. On-board Wi-Fi setup from a phone (BOOT held 5 s, captive form at 192.168.4.1): not tested yet.
 2. Exe icon/version resources (not set yet; editing resources after pkg can break its payload).
-3. Merge `wifi-sync` into `main` once step 1 is done.
-4. Ideas not started: degrees F / mph for weather, alert beeps on the unused speaker (amp enable GPIO 4).
+3. Ideas not started: degrees F / mph for weather, alert beeps on the unused speaker (amp enable GPIO 4).
 
 ## Build notes (Windows)
 
