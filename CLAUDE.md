@@ -14,7 +14,13 @@ Firmware in `src/` (PlatformIO, Arduino, TFT_eSPI configured in `platformio.ini`
 
 ## Status
 
-- Display, screens, alerts, and the companion with `--limits` all work (tested on COM8).
+- Display, screens, alerts, and the companion with `--limits` all work. The board is now on COM12
+  (CH340, 1a86:7523); COM3 is an unrelated CH9102 with the same vendor id, so auto-detect matches the PID.
+- Firmware 0.2.0: settings saved in NVS (`src/settings.cpp`), rotation 0/2 with touch flipped to match,
+  auto screen cycle, wipe/fade transitions, configurable dim, `preview` frames.
+- Companion 0.2.0 (`companion/src/`, CommonJS so pkg can bundle it): tray icon via a hidden PowerShell
+  NotifyIcon helper, settings page on 127.0.0.1:47820 (Host check + JSON-only POST), config in
+  `%APPDATA%\claudeBoard`, single instance via the UI port. `npm run build:exe` -> `dist/claudeBoard.exe`.
 - `--limits` reads the `claude` CLI sign-in from `~/.claude/.credentials.json` and calls the undocumented
   `api.anthropic.com/api/oauth/usage` endpoint. The token expires every few hours; running `claude` renews it.
   The desktop app's sign-in is not in that file.
@@ -25,7 +31,7 @@ Firmware in `src/` (PlatformIO, Arduino, TFT_eSPI configured in `platformio.ini`
 1. Calibrate touch: `TOUCH_DEBUG` prints `{"type":"touch","rx","ry",...}` per tap; tune `TOUCH_X/Y_MIN/MAX`,
    add `TOUCH_SWAP_XY` / `TOUCH_INVERT_X/Y` in `platformio.ini` if needed.
 2. Remove `-DBOOT_SELFTEST=1` (red/green/blue flash at boot) and `-DTOUCH_DEBUG=1` once happy.
-3. Auto-start the companion at Windows login (Task Scheduler or a Startup shortcut).
+3. Exe icon/version resources (not set yet; editing resources after pkg can break its payload).
 
 ## Build notes (Windows)
 
