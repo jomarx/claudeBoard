@@ -181,13 +181,15 @@ static void navBar(int active) {
     g.tri(x + 17, cy - 8, x + 17, cy + 8, x + 30, cy, C_GREEN);
   }
 
-  // Page dots centered in the gap between the left pair and the play button.
+  // Page dots centered in the gap between the left pair and the play button, closer
+  // together when there are many pages (7 pages in portrait's 86 px gap: 12 px apart).
   const int n = (int)View::PageCount;
-  const int mid = (navNextX() + NAV_BW + navPlayX()) / 2;
-  const int dx = mid - (n - 1) * 7;
+  const int left = navNextX() + NAV_BW, right = navPlayX(), mid = (left + right) / 2;
+  const int sp = n > 1 ? min(14, (right - left - 12) / (n - 1)) : 0;
+  const int dx = mid - (n - 1) * sp / 2;
   for (int i = 0; i < n; i++) {
-    if (i == active) g.circle(dx + i * 14, cy, 3, C_TEXT);
-    else g.circle(dx + i * 14, cy, 2, C_DIM);
+    if (i == active) g.circle(dx + i * sp, cy, 3, C_TEXT);
+    else g.circle(dx + i * sp, cy, 2, C_DIM);
   }
 }
 
@@ -869,6 +871,127 @@ static void drawWeather() {
   navBar((int)View::Weather);
 }
 
+// ---------- media ----------
+
+// Button layout, shared by drawing and hit-testing: a transport row (previous, play/pause,
+// next as circles) and a volume row (three rounded buttons).
+struct MediaGeo {
+  int titleY, artistY;
+  int rowY, rSmall, rBig, xPrev, xPlay, xNext;
+  int volY, volH, volW, volGap;
+};
+static MediaGeo mediaGeo() {
+  // Landscape row at 126: the play circle (r 30) then starts at 96, below the "paused" line.
+  if (land) return MediaGeo{30, 62, 126, 24, 30, 90, 160, 230, 164, 32, 92, 10};
+  return MediaGeo{40, 100, 182, 26, 34, 50, 120, 190, 234, 36, 68, 8};
+}
+static int volX(const MediaGeo &m, int i) { return 12 + i * (m.volW + m.volGap); }
+
+// Up to two lines of font 4, broken at a space; the second line shortened with "..".
+static int wrapTitle(const char *s, int y, uint16_t c) {
+  const int room = W - 24;
+  char a[48], b[48];
+  strlcpy(a, s, sizeof a);
+  b[0] = 0;
+  if (g.width(a, 4) > room) {
+    // Longest prefix that fits and ends at a space; the rest goes to line two.
+    int cut = -1;
+    for (int i = 1; a[i]; i++) {
+      if (a[i] != ' ') continue;
+      char t[48];
+      strlcpy(t, a, i + 1);
+      if (g.width(t, 4) > room) break;
+      cut = i;
+    }
+    if (cut < 0) cut = strlen(a) / 2;   // one long word: split it anyway
+    strlcpy(b, a + cut + (a[cut] == ' '), sizeof b);
+    a[cut] = 0;
+    if (g.width(b, 4) > room) {
+      for (int len = strlen(b); len > 0 && g.width(b, 4) + g.width("..", 4) > room;) b[--len] = 0;
+      strlcat(b, "..", sizeof b);
+    }
+  }
+  g.text(a, W / 2, y, 4, c, C_BG, TC_DATUM);
+  if (!b[0]) return 1;
+  g.text(b, W / 2, y + 26, 4, c, C_BG, TC_DATUM);
+  return 2;
+}
+
+static void mediaCircle(int cx, int cy, int r, uint16_t bg) { g.circle(cx, cy, r, bg); }
+
+static void drawMedia() {
+  g.fill(C_BG);
+  const MediaData &m = g_media;
+  const MediaGeo geo = mediaGeo();
+  const bool none = m.state == MediaState::None;
+  header(!none && m.app[0] ? m.app : "Media", C_BG);
+
+  // What's playing. Landscape has room for one title line only.
+  const char *title = none ? "Nothing playing" : m.title[0] ? m.title : "Untitled";
+  int lines = 1;
+  if (land) {
+    char t[48];
+    strlcpy(t, title, sizeof t);
+    if (g.width(t, 4) > W - 24) {
+      for (int len = strlen(t); len > 0 && g.width(t, 4) + g.width("..", 4) > W - 24;) t[--len] = 0;
+      strlcat(t, "..", sizeof t);
+    }
+    g.text(t, W / 2, geo.titleY, 4, none ? C_MUTED : C_TEXT, C_BG, TC_DATUM);
+  } else {
+    lines = wrapTitle(title, geo.titleY, none ? C_MUTED : C_TEXT);
+  }
+  const char *sub = none ? "Play something on the PC" : m.artist;
+  const int subY = land ? geo.artistY : geo.titleY + lines * 26 + 8;
+  if (sub[0]) g.text(sub, W / 2, subY, 2, C_MUTED, C_BG, TC_DATUM);
+  if (m.state == MediaState::Paused || m.state == MediaState::Stopped)
+    g.text(m.state == MediaState::Paused ? "paused" : "stopped", W / 2, subY + 18, 2, C_AMBER, C_BG, TC_DATUM);
+
+  // Transport row. A tapped button lights up briefly (g_ui.pressedMedia).
+  const int cy = geo.rowY, p = g_ui.pressedMedia;
+  auto bg = [&](int key, uint16_t normal) { return p == key ? C_ALERT_FG : normal; };
+  int x = geo.xPrev, r = geo.rSmall;
+  mediaCircle(x, cy, r, bg(MK_PREV, C_TRACK));                       // |<
+  g.rect(x - 10, cy - 9, 3, 18, C_TEXT);
+  g.tri(x + 8, cy - 9, x + 8, cy + 9, x - 6, cy, C_TEXT);
+  x = geo.xNext;
+  mediaCircle(x, cy, r, bg(MK_NEXT, C_TRACK));                       // >|
+  g.rect(x + 7, cy - 9, 3, 18, C_TEXT);
+  g.tri(x - 8, cy - 9, x - 8, cy + 9, x + 6, cy, C_TEXT);
+  x = geo.xPlay; r = geo.rBig;
+  const uint16_t playBg = bg(MK_PLAY, C_CORAL);
+  mediaCircle(x, cy, r, playBg);
+  if (m.state == MediaState::Playing) {                              // || pauses
+    g.rect(x - 9, cy - 12, 6, 24, C_TEXT);
+    g.rect(x + 3, cy - 12, 6, 24, C_TEXT);
+  } else {                                                           // > plays
+    g.tri(x - 7, cy - 13, x - 7, cy + 13, x + 13, cy, C_TEXT);
+  }
+
+  // Volume row.
+  static const char *const labels[3] = {"vol -", "mute", "vol +"};
+  for (int i = 0; i < 3; i++) {
+    const uint16_t b = bg(MK_VOL_DOWN + i, C_TRACK);
+    g.rrect(volX(geo, i), geo.volY, geo.volW, geo.volH, 8, b);
+    g.text(labels[i], volX(geo, i) + geo.volW / 2, geo.volY + geo.volH / 2, 2, C_TEXT, b, MC_DATUM);
+  }
+  navBar((int)View::Media);
+}
+
+static int mediaKeyAt(int x, int y) {
+  const MediaGeo m = mediaGeo();
+  auto inCircle = [&](int cx, int r) {
+    const int dx = x - cx, dy = y - m.rowY, rr = r + 6;   // a little slack around each
+    return dx * dx + dy * dy <= rr * rr;
+  };
+  if (inCircle(m.xPlay, m.rBig)) return MK_PLAY;
+  if (inCircle(m.xPrev, m.rSmall)) return MK_PREV;
+  if (inCircle(m.xNext, m.rSmall)) return MK_NEXT;
+  if (y >= m.volY - 4 && y < m.volY + m.volH + 4)
+    for (int i = 0; i < 3; i++)
+      if (x >= volX(m, i) && x < volX(m, i) + m.volW) return MK_VOL_DOWN + i;
+  return -1;
+}
+
 // ---------- calendar ----------
 
 // Days since 1970-01-01 for a civil date (H. Hinnant's algorithm), m 1..12.
@@ -1122,6 +1245,7 @@ static void drawBand(View v, const AlertInfo &alert, int band) {
     case View::Back: drawBack(); break;
     case View::Clock: drawClock(); break;
     case View::Weather: drawWeather(); break;
+    case View::Media: drawMedia(); break;
     case View::Calendar: drawCalendar(); break;
     case View::Launcher: drawLauncher(); break;
     case View::Today:
@@ -1182,6 +1306,12 @@ HitResult uiHitTest(View v, int x, int y) {
     const CalGeo c = calGeo();
     if (y >= c.titleY - 8 && y < c.labelY)
       r.kind = x < W / 3 ? Hit::MonthPrev : x >= W * 2 / 3 ? Hit::MonthNext : Hit::MonthToday;
+  } else if (v == View::Media) {
+    const int k = mediaKeyAt(x, y);
+    if (k >= 0) {
+      r.kind = Hit::Media;
+      r.index = k;
+    }
   } else if (v == View::Launcher) {
     for (int i = 0; i < g_appCount; i++) {
       int ax, ay, aw, ah;

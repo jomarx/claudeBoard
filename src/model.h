@@ -102,3 +102,15 @@ struct WeatherData {
 };
 
 extern WeatherData g_weather;
+
+// What's playing on the PC, from the companion (Windows' media session: the same thing the
+// volume flyout shows). The board's buttons send media keys back; see the "media" event.
+enum class MediaState : uint8_t { None = 0, Stopped = 1, Paused = 2, Playing = 3 };
+struct MediaData {
+  MediaState state = MediaState::None;   // None = no media session on the PC
+  char app[16] = "";
+  char title[48] = "";
+  char artist[32] = "";
+};
+
+extern MediaData g_media;

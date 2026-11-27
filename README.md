@@ -94,9 +94,10 @@ alert screen and the "you're back" screen without waiting for real usage.
 
 ## Controls
 
-Six screens: **Main** (gauges), **Today** (daily detail), **Clock** (digital, analog, rings, flip, words or binary, picked
+Seven screens: **Main** (gauges), **Today** (daily detail), **Clock** (digital, analog, rings, flip, words or binary, picked
 under "Clock style" on the settings page), **Weather** (current conditions for a place you
-pick on the settings page), **Calendar** (this month, today
+pick on the settings page), **Media** (what's playing on the PC, with previous / play-pause /
+next and volume buttons), **Calendar** (this month, today
 circled) and **Apps** (a launcher). Each has a bar along the bottom: previous, next, the page
 dots, and play/pause for the automatic screen change.
 
@@ -106,6 +107,10 @@ dots, and play/pause for the automatic screen change.
 | Tap elsewhere | Main, Today: next screen. Calendar: month title left / middle / right = previous month / this month / next month. Apps: opens that tile on the PC | tap a button |
 | BOOT button | next screen | dismiss |
 | Long press (touch or BOOT) | cycle brightness | - |
+
+The Media screen shows what Windows' own media flyout shows (Spotify, a browser tab, VLC...)
+and its buttons press the PC's media keys, so they control whatever is playing; no setup.
+It needs the tray helper, so not with `--no-tray`.
 
 The RGB LED on the back is a status light ("Back LED" on the settings page): green, amber or red
 with the 5-hour usage like the gauge, a red pulse while a limit alert is up, a green pulse when

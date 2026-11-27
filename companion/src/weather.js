@@ -3,6 +3,7 @@
 // to geocoding-api.open-meteo.com. The board gets a compact "weather" frame (src/protocol.h).
 
 const { log } = require('./log');
+const { ascii } = require('./text');
 
 const REFRESH_MS = 15 * 60 * 1000;
 const RETRY_MS = 2 * 60 * 1000;     // after a failed fetch
@@ -13,10 +14,6 @@ const weatherState = { data: null, error: '', at: 0, seq: 0, key: '' };
 
 const round = (v) => (Number.isFinite(v) ? Math.round(v) : null);
 
-// The board's fonts are ASCII only: drop accents ("São Paulo" -> "Sao Paulo"), then anything left.
-function ascii(s, max) {
-  return String(s).normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^\x20-\x7e]/g, '?').slice(0, max);
-}
 
 async function getJSON(url) {
   const r = await fetch(url, { signal: AbortSignal.timeout(TIMEOUT_MS) });

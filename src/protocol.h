@@ -36,6 +36,8 @@
 //    "day":1,"hi":33,"lo":26,"rain":40,"at":1764143520}
 //       -> current weather: degrees C, km/h, WMO code, rain = today's chance % (-1 unknown),
 //       at = observation time. {"type":"weather","valid":false} clears it.
+//   {"type":"media","state":"playing","app":"Spotify","title":"...","artist":"..."}
+//       -> now playing on the PC; state "playing" | "paused" | "stopped" | "none" (no session).
 //   {"type":"preview","view":"alert"|"back"}           -> show an overlay to test it
 //
 // Device -> host
@@ -46,6 +48,8 @@
 //   {"type":"event","name":"dismiss"|"snooze"|"screen"|"brightness","value":N}
 //   {"type":"event","name":"play","value":1|0}         (auto page change started / paused)
 //   {"type":"event","name":"launch","value":i}         (launcher tile i tapped)
+//   {"type":"event","name":"media","value":k}          (media button: 0 previous, 1 play/pause,
+//                                                        2 next, 3 volume down, 4 mute, 5 up)
 //
 // Every field inside "usage" is optional; missing ones keep their last value.
 
@@ -58,6 +62,7 @@ struct Requests {
   int step = 0;           // or pages to move by (+1 / -1)
   bool apps = false;      // the launcher list changed
   bool weather = false;   // a weather frame arrived
+  bool media = false;     // a media (now playing) frame arrived
   int preview = -1;       // 0 = alert, 1 = back
 };
 

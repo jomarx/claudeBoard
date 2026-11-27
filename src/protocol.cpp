@@ -15,6 +15,13 @@ void protocolSendHello() {
   Serial.printf("{\"type\":\"hello\",\"fw\":\"%s\",\"w\":240,\"h\":320,\"cfg\":true,\"apps\":true}\n", FW_VERSION);
 }
 
+// Copies text for the screen: the board fonts are ASCII only, so anything else shows as '?'.
+static void copyAscii(char *dst, size_t n, const char *src) {
+  size_t i = 0;
+  for (; src[i] && i < n - 1; i++) dst[i] = (src[i] >= 32 && src[i] < 127) ? src[i] : '?';
+  dst[i] = 0;
+}
+
 static const char *FX_NAMES[] = {"none", "wipe", "fade"};
 static const char *CLOCK_NAMES[CLOCK_STYLES] = {"digital", "analog", "rings", "flip", "words", "binary"};
 static const char *LED_NAMES[LED_MODES] = {"off", "usage", "alerts"};
@@ -149,11 +156,7 @@ static void handleLine(const char *line, Requests &req) {
     if (doc["valid"].is<bool>() && !doc["valid"].as<bool>()) {
       w = WeatherData();
     } else {
-      const char *place = doc["place"] | "";
-      size_t i = 0;
-      for (; place[i] && i < sizeof w.place - 1; i++)
-        w.place[i] = (place[i] >= 32 && place[i] < 127) ? place[i] : '?';
-      w.place[i] = 0;
+      copyAscii(w.place, sizeof w.place, doc["place"] | "");
       w.temp = doc["t"] | 0;
       w.feels = doc["feels"] | w.temp;
       w.hi = doc["hi"] | w.temp;
@@ -169,6 +172,18 @@ static void handleLine(const char *line, Requests &req) {
     req.weather = true;
     return;
   }
+  if (!strcmp(type, "media")) {
+    MediaData &m = g_media;
+    const char *st = doc["state"] | "none";
+    m.state = !strcmp(st, "playing") ? MediaState::Playing
+            : !strcmp(st, "paused") ? MediaState::Paused
+            : !strcmp(st, "stopped") ? MediaState::Stopped : MediaState::None;
+    copyAscii(m.app, sizeof m.app, doc["app"] | "");
+    copyAscii(m.title, sizeof m.title, doc["title"] | "");
+    copyAscii(m.artist, sizeof m.artist, doc["artist"] | "");
+    req.media = true;
+    return;
+  }
   if (!strcmp(type, "apps")) {
     JsonArrayConst list = doc["list"];
     uint8_t n = 0;
@@ -176,11 +191,7 @@ static void handleLine(const char *line, Requests &req) {
       if (n >= MAX_APPS) break;
       const char *name = v | "";
       if (!*name) continue;
-      // The board fonts are ASCII only; anything else shows as '?'.
-      size_t i = 0;
-      for (; name[i] && i < sizeof g_apps[n].name - 1; i++)
-        g_apps[n].name[i] = (name[i] >= 32 && name[i] < 127) ? name[i] : '?';
-      g_apps[n].name[i] = 0;
+      copyAscii(g_apps[n].name, sizeof g_apps[n].name, name);
       n++;
     }
     g_appCount = n;

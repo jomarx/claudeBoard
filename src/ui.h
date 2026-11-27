@@ -7,9 +7,10 @@ enum class View : uint8_t {
   Today = 1,     // daily detail
   Clock = 2,     // big clock in one of several styles (Settings::clock)
   Weather = 3,   // current weather for the place set on the companion
-  Calendar = 4,  // month grid
-  Launcher = 5,  // app tiles that open things on the PC
-  PageCount = 6, // number of pageable screens
+  Media = 4,     // now playing on the PC, transport and volume buttons
+  Calendar = 5,  // month grid
+  Launcher = 6,  // app tiles that open things on the PC
+  PageCount = 7, // number of pageable screens
   Alert,         // limit alert overlay
   Back,          // "limit has reset" overlay
 };
@@ -24,6 +25,7 @@ struct UiState {
   bool playing = false;   // automatic page change running (play/pause button)
   int monthOffset = 0;    // calendar: months away from the current one
   int pressedApp = -1;    // launcher: tile drawn highlighted right after a tap
+  int pressedMedia = -1;  // media: button drawn highlighted right after a tap (MediaKey)
 };
 extern UiState g_ui;
 
@@ -41,8 +43,12 @@ enum class Hit : uint8_t {
   Prev, Next, PlayPause,              // the nav bar on every pageable screen
   MonthPrev, MonthNext, MonthToday,   // calendar title row
   App,                                // launcher tile, index in HitResult
+  Media,                              // media button, MediaKey in HitResult.index
   Snooze, Dismiss,                    // alert buttons
 };
+
+// The media screen's buttons; the value goes to the PC in the "media" event.
+enum MediaKey : uint8_t { MK_PREV = 0, MK_PLAY = 1, MK_NEXT = 2, MK_VOL_DOWN = 3, MK_MUTE = 4, MK_VOL_UP = 5, MK_COUNT = 6 };
 struct HitResult {
   Hit kind = Hit::None;
   int index = -1;

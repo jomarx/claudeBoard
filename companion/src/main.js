@@ -11,6 +11,7 @@ const { createServer } = require('./server');
 const startup = require('./startup');
 const { launch, frontNames } = require('./launcher');
 const { refreshWeather, weatherFrame, weatherState, geocode } = require('./weather');
+const { MEDIA_VK, mediaFrame } = require('./media');
 const VERSION = require('../package.json').version;
 
 // ---------- command line ----------
@@ -103,6 +104,11 @@ async function run() {
     list: effective().apps.map((a) => a.name.replace(/[^\x20-\x7e]/g, '?')),
   });
 
+  // Now playing, as last reported by the tray helper; sent on every change and on (re)connect.
+  let media = mediaFrame(null);
+  const sendMedia = () => { if (board.state.ready) board.send(media); };
+  if (tray) tray.on('media', (m) => { media = mediaFrame(m); sendMedia(); });
+
   // Weather goes out only when there is something new (weatherState.seq moved) or the
   // board came back; -1 forces the next push to send it.
   let weatherSent = -1;
@@ -138,10 +144,17 @@ async function run() {
     sendBoardCfg();
     sendApps();
     weatherSent = -1;   // a (re)booted board has no weather
+    sendMedia();
     push();
     schedule();
   });
   board.on('event', (m) => {
+    if (m.name === 'media') {
+      // The keys go through the tray helper; without it (--no-tray) there's nothing to press them.
+      const vk = MEDIA_VK[m.value];
+      if (vk && tray) tray.key(vk);
+      else if (vk) log('media buttons need the tray helper (running with --no-tray)');
+    }
     if (m.name === 'launch') {
       const a = effective().apps[m.value];
       if (a) open(a);
@@ -188,6 +201,7 @@ async function run() {
         board: board.state,
         limits: { enabled: cfg.limits, ok: !!limitsState.data && !limitsState.error, error: limitsState.error, at: limitsState.at },
         weather: { set: cfg.weather.lat !== null, data: weatherState.data, error: weatherState.error, at: weatherState.at },
+        media,
         lastFrame: lastFrame && {
           at: lastFrameAt, plan: lastFrame.plan, tokens: lastFrame.today.tokens, cost: lastFrame.today.cost,
           session: lastFrame.session.pct, week: lastFrame.week.pct,

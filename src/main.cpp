@@ -18,7 +18,9 @@ AppEntry g_apps[MAX_APPS];
 uint8_t g_appCount = 0;
 UiState g_ui;
 WeatherData g_weather;
+MediaData g_media;
 static uint32_t pressedAppMs = 0;   // when a launcher tile was tapped, to un-highlight it
+static uint32_t pressedMediaMs = 0; // same for a media button
 
 static View page = View::Main;      // the pageable screen underneath any overlay
 static View shown = View::Main;     // what is on the glass right now
@@ -168,6 +170,17 @@ static void handleTap(int x, int y) {
     case Hit::MonthPrev: g_ui.monthOffset--; dirty = true; break;
     case Hit::MonthNext: g_ui.monthOffset++; dirty = true; break;
     case Hit::MonthToday: if (g_ui.monthOffset) { g_ui.monthOffset = 0; dirty = true; } break;
+    case Hit::Media:
+      g_ui.pressedMedia = h.index;
+      pressedMediaMs = millis();
+      dirty = true;
+      protocolSendEvent("media", h.index);
+      // Flip the play button now; the PC's next "media" frame confirms or corrects it.
+      if (h.index == MK_PLAY) {
+        if (g_media.state == MediaState::Playing) g_media.state = MediaState::Paused;
+        else if (g_media.state == MediaState::Paused) g_media.state = MediaState::Playing;
+      }
+      break;
     case Hit::App:
       g_ui.pressedApp = h.index;
       pressedAppMs = millis();
@@ -291,6 +304,11 @@ void loop() {
     if (page == View::Launcher) dirty = true;
   }
   if (req.weather && page == View::Weather) dirty = true;
+  if (req.media && page == View::Media) dirty = true;
+  if (g_ui.pressedMedia >= 0 && millis() - pressedMediaMs > 250) {
+    g_ui.pressedMedia = -1;
+    dirty = true;
+  }
   if (g_ui.pressedApp >= 0 && millis() - pressedAppMs > 400) {
     g_ui.pressedApp = -1;
     dirty = true;

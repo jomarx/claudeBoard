@@ -3,8 +3,10 @@
 //   node -> helper:  status|<#hex colour>|<tooltip>|<menu status line>
 //                    startup|0 or 1
 //                    front|<process name>,<process name>...   (just before launching an app)
+//                    key|<virtual key code>                   (a media/volume key press)
 //   helper -> node:  open | reconnect | startup | quit
 //                    log|<text>
+//                    media|<state>|<app>|<title>|<artist>     (what's playing, when it changes)
 //
 // "front" exists because Windows won't let a background process put another app's window
 // in front: a launched app opens behind, or an already running one doesn't come up. The
@@ -73,8 +75,68 @@ public static class Fg {
     keybd_event(0x12, 0, 2 /* KEYUP */, UIntPtr.Zero);
     return Try(h) ? "ok after alt" : "refused";
   }
+
+  // A media or volume key, as if pressed on a keyboard (they are extended keys).
+  public static void Key(byte vk) {
+    keybd_event(vk, 0, 1 /* EXTENDEDKEY */, UIntPtr.Zero);
+    keybd_event(vk, 0, 3 /* EXTENDEDKEY | KEYUP */, UIntPtr.Zero);
+  }
 }
 '@
+
+# ---- now playing: Windows' media session (what the volume flyout shows) ----
+# WinRT calls are async; AsTask turns them into .NET tasks that the timer checks without
+# blocking. If any of this is missing (old Windows), media info is just never sent.
+$script:media = $null
+try {
+  Add-Type -AssemblyName System.Runtime.WindowsRuntime
+  $script:asTask = [System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {
+    $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and
+    $_.GetParameters()[0].ParameterType.Name -match '^IAsyncOperation.1$'   # IAsyncOperation, generic arity 1 (no backtick: this script is a JS template)
+  } | Select-Object -First 1
+  $script:mgrType = [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager, Windows.Media.Control, ContentType = WindowsRuntime]
+  $script:propsType = [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionMediaProperties, Windows.Media.Control, ContentType = WindowsRuntime]
+  $script:media = @{ mgr = $null; mgrTask = $null; session = $null; propsTask = $null; next = [DateTime]::UtcNow; last = '' }
+} catch { Send ("log|media info unavailable: " + $_.Exception.Message) }
+
+function AsTask($op, [Type]$t) { $script:asTask.MakeGenericMethod($t).Invoke($null, @($op)) }
+function Clean($s) { ([string]$s -replace '[|\r\n]', ' ').Trim() }
+
+function ReportMedia($session, $props) {
+  $state = 'none'; $app = ''; $title = ''; $artist = ''
+  if ($session) {
+    $st = [string]$session.GetPlaybackInfo().PlaybackStatus
+    $state = @{ Playing = 'playing'; Paused = 'paused'; Stopped = 'stopped'; Changing = 'playing' }[$st]
+    if (-not $state) { $state = 'none' }   # Closed / Opened: nothing to control
+    $app = $session.SourceAppUserModelId
+    if ($props) { $title = $props.Title; $artist = $props.Artist }
+  }
+  $line = 'media|' + $state + '|' + (Clean $app) + '|' + (Clean $title) + '|' + (Clean $artist)
+  if ($line -ne $script:media.last) { $script:media.last = $line; Send $line }
+}
+
+function TickMedia {
+  $m = $script:media
+  if (-not $m.mgr) {
+    if (-not $m.mgrTask) { $m.mgrTask = AsTask ($script:mgrType::RequestAsync()) $script:mgrType; return }
+    if (-not $m.mgrTask.IsCompleted) { return }
+    $m.mgr = $m.mgrTask.Result
+    $m.mgrTask = $null
+  }
+  if ($m.propsTask) {
+    if (-not $m.propsTask.IsCompleted) { return }
+    $props = $null
+    if (-not $m.propsTask.IsFaulted) { $props = $m.propsTask.Result }
+    $m.propsTask = $null
+    ReportMedia $m.session $props
+    return
+  }
+  if ([DateTime]::UtcNow -lt $m.next) { return }
+  $m.next = [DateTime]::UtcNow.AddSeconds(2)
+  $m.session = $m.mgr.GetCurrentSession()
+  if ($m.session) { $m.propsTask = AsTask ($m.session.TryGetMediaPropertiesAsync()) $script:propsType }
+  else { ReportMedia $null $null }
+}
 
 # The leading comma keeps an empty result an empty array instead of PowerShell's $null.
 function ProcIds($names) {
@@ -147,6 +209,8 @@ $timer = New-Object System.Windows.Forms.Timer
 $timer.Interval = 150
 $timer.add_Tick({
   if ($script:fronts.Count) { try { TickFronts } catch { Send ("log|front failed: " + $_.Exception.Message); $script:fronts.Clear() } }
+  # A media error turns media info off rather than repeating every tick.
+  if ($script:media) { try { TickMedia } catch { Send ("log|media info stopped: " + $_.Exception.Message); $script:media = $null } }
   while ($script:task.IsCompleted) {
     $line = $null
     if (-not $script:task.IsFaulted) { $line = $script:task.Result }
@@ -161,6 +225,11 @@ $timer.add_Tick({
       $statusItem.Text = $p[3]
     } elseif ($p[0] -eq 'startup') {
       $startup.Checked = ($p[1] -eq '1')
+    } elseif ($p[0] -eq 'key' -and $p.Length -ge 2) {
+      try {
+        [Fg]::Key([byte][int]$p[1])
+        if ($script:media) { $script:media.next = [DateTime]::UtcNow.AddMilliseconds(400) }   # show the effect soon
+      } catch { Send ("log|key failed: " + $_.Exception.Message) }
     } elseif ($p[0] -eq 'front' -and $p.Length -ge 2) {
       # Never let this throw: the tick would end before the next stdin read is armed.
       try {
@@ -202,6 +271,10 @@ class Tray extends EventEmitter {
         const cmd = buf.slice(0, i).trim();
         buf = buf.slice(i + 1);
         if (cmd.startsWith('log|')) log('tray:', cmd.slice(4));
+        else if (cmd.startsWith('media|')) {
+          const [, state, app, title, artist] = cmd.split('|');
+          this.emit('media', { state, app: app || '', title: title || '', artist: artist || '' });
+        }
         else if (cmd) this.emit('command', cmd);
       }
     });
@@ -235,6 +308,11 @@ class Tray extends EventEmitter {
   setStartup(on) {
     this.last.startup = `startup|${on ? 1 : 0}`;
     this.write(this.last.startup);
+  }
+
+  // Press a key: only the media and volume keys are let through.
+  key(vk) {
+    if ([0xad, 0xae, 0xaf, 0xb0, 0xb1, 0xb3].includes(vk)) this.write(`key|${vk}`);
   }
 
   // Raise the next window of any of these processes (names without .exe).
