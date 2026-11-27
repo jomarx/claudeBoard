@@ -2,8 +2,9 @@
 
 Firmware for the 2.8" ESP32-32E display board (E32R28T / E32N28T, ST7789 240x320,
 sold by diymore). Pinout: https://www.lcdwiki.com/2.8inch_ESP32-32E-7789
-All data arrives over the USB cable as newline-delimited JSON (115200 baud, CH340).
-The protocol is documented at the top of `src/protocol.h`.
+All data arrives over the USB cable as newline-delimited JSON (115200 baud, CH340) from a
+companion app on the PC (`companion/`, a tray app with a settings page). The protocol is
+documented at the top of `src/protocol.h`.
 
 ## Build and flash
 
@@ -13,6 +14,9 @@ Needs PlatformIO (the VS Code extension, or `pip install platformio`).
 pio run -e e32r28t -t upload     # resistive touch (XPT2046), default
 pio run -e e32n28t -t upload     # no-touch version, BOOT button only
 ```
+
+Add `--upload-port COMx` to pick the port. Quit the companion first (tray menu, Quit): while
+it runs it holds the serial port and the upload fails with "Access is denied".
 
 On Windows, if the library install fails with "filename too long", build with a
 short workspace path, for example: `set PLATFORMIO_WORKSPACE_DIR=C:\pio-cm`.
@@ -81,9 +85,12 @@ Nothing on the board holds any Claude credentials; it only ever sees the numbers
 ```
 pip install pyserial
 python tools/send_fake.py --list
-python tools/send_fake.py COM8           # demo numbers
-python tools/send_fake.py COM8 --ramp    # walks 50 -> 100%, fires the alerts, then resets
+python tools/send_fake.py COMx           # demo numbers
+python tools/send_fake.py COMx --ramp    # walks 50 -> 100%, fires the alerts, then resets
 ```
+
+With the companion running, the settings page's "Try it" buttons show the next screen, the
+alert screen and the "you're back" screen without waiting for real usage.
 
 ## Controls
 
@@ -92,9 +99,16 @@ python tools/send_fake.py COM8 --ramp    # walks 50 -> 100%, fires the alerts, t
 | Tap / BOOT button | next screen | tap a button / BOOT dismisses |
 | Long press (touch or BOOT) | cycle brightness | - |
 
-Screen dims after 2 minutes idle (settable); the first touch only wakes it. Alerts fire at
-80%, 90% and 100% of the 5-hour limit (change with a `cfg` frame). A higher threshold
-breaks through a snooze. When a window that hit 100% resets, a "You're back" screen shows.
+Screen dims after 2 minutes idle; the first touch only wakes it. Alerts fire at 80%, 90%
+and 100% of the 5-hour limit. A higher threshold breaks through a snooze. When a window that
+hit 100% resets, a "You're back" screen shows.
+
+With "change screen every N seconds" set, the board pages by itself after N seconds without a
+touch; it never pages away from an alert. The transition (none, wipe, fade) applies to every
+page change, tapped or automatic; alerts always appear at once.
+
+All of these are set on the companion's settings page and saved on the board, so it keeps them
+when the PC is off. A long press still cycles brightness, and the companion saves that too.
 
 ## If something looks wrong on first boot
 
@@ -106,4 +120,5 @@ breaks through a snooze. When a window that hit 100% resets, a "You're back" scr
 - Garbled or blank picture: the panel may actually be an ILI9341; swap `-DST7789_DRIVER` for `-DILI9341_2_DRIVER`.
 - Upside down: pick "Portrait flipped" on the companion's settings page (touch follows).
 - Taps land in the wrong place: add `-DTOUCH_SWAP_XY`, `-DTOUCH_INVERT_X` or `-DTOUCH_INVERT_Y`,
-  or tune `TOUCH_X_MIN/MAX`, `TOUCH_Y_MIN/MAX`.
+  or tune `TOUCH_X_MIN/MAX`, `TOUCH_Y_MIN/MAX`. The values in `platformio.ini` are calibrated for
+  portrait (rotation 0); the flipped orientation mirrors them in code, so calibrate in portrait.
