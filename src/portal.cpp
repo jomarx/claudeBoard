@@ -70,7 +70,7 @@ static void sendForm(const char *error) {
   h += ip(n.dns);
   h += F("\"><label>Server: the PC running the companion</label><input name=host required maxlength=63 value=\"");
   h += esc(n.host);
-  h += F("\"><label>Server port</label><input name=port type=number min=1 max=65535 value=\"");
+  h += F("\"><label>Server port</label><input name=port type=number min=1024 max=65535 required value=\"");
   h += String(n.port ? n.port : 47821);
   h += F("\"><label>Pairing token (Sync section of the companion's settings page)</label>"
          "<input name=token maxlength=32 placeholder='empty keeps the saved one'>"
@@ -79,13 +79,22 @@ static void sendForm(const char *error) {
   web->send(error ? 400 : 200, "text/html; charset=utf-8", h);
 }
 
+// Only phones on the setup network itself are served (the station is off while setup is
+// open, but check anyway): Wi-Fi settings must never come from the home network.
+static bool fromSetupNetwork() {
+  if (web->client().localIP() == WiFi.softAPIP()) return true;
+  web->send(403, "text/plain", "setup is only reachable on the board's own setup network");
+  return false;
+}
+
 static void handleSave() {
+  if (!fromSetupNetwork()) return;
   NetSettings n = netSettings();   // start from what is saved: empty password/token keep theirs
   strlcpy(n.ssid, web->arg("ssid").c_str(), sizeof n.ssid);
   if (web->arg("pass").length()) strlcpy(n.pass, web->arg("pass").c_str(), sizeof n.pass);
-  if (web->arg("token").length()) strlcpy(n.token, web->arg("token").c_str(), sizeof n.token);
+  if (web->arg("token").length()) netSetToken(n, web->arg("token").c_str());
   strlcpy(n.host, web->arg("host").c_str(), sizeof n.host);
-  n.port = constrain(web->arg("port").toInt(), 1, 65535);
+  if (web->arg("port").length()) n.port = constrain(web->arg("port").toInt(), 0, 65535);   // empty keeps it
   IPAddress a, g, m, d;
   if (!a.fromString(web->arg("ip")) || !g.fromString(web->arg("gw")) || !m.fromString(web->arg("mask"))) {
     sendForm("The board IP, gateway and subnet mask must look like 192.168.1.50.");
@@ -105,6 +114,7 @@ static void handleSave() {
   }
   netSave(n);
   g_settings.sync = SyncMode::Wifi;
+  netSetBoardChoseSync(true);   // so a companion on USB adopts Wi-Fi instead of undoing it
   settingsSave();
   String h = F("<!doctype html><html><head><meta charset=utf-8>");
   h += FPSTR(STYLE);
@@ -117,6 +127,7 @@ static void handleSave() {
 
 // Phones probe a known URL to detect a captive network; anything unknown goes to the form.
 static void redirect() {
+  if (!fromSetupNetwork()) return;
   web->sendHeader("Location", "http://192.168.4.1/", true);
   web->send(302, "text/plain", "");
 }
@@ -128,8 +139,11 @@ void portalStart() {
   snprintf(apSsid, sizeof apSsid, "claudeBoard-%02X%02X", mac[4], mac[5]);
   snprintf(apPass, sizeof apPass, "%08lu", (unsigned long)(esp_random() % 100000000UL));
 
-  // Keep a running station (Sync is Wi-Fi) going beside the setup network.
-  WiFi.mode(WiFi.getMode() & WIFI_MODE_STA ? WIFI_AP_STA : WIFI_AP);
+  // Setup owns the radio: the station and server link drop (portalStop brings them back),
+  // so nothing on the home network can reach this form. AP+STA only so the network scan
+  // works; the station joins nothing.
+  netSuspend();
+  WiFi.mode(WIFI_AP_STA);
   WiFi.softAPConfig(IPAddress(192, 168, 4, 1), IPAddress(192, 168, 4, 1), IPAddress(255, 255, 255, 0));
   WiFi.softAP(apSsid, apPass);
   WiFi.scanNetworks(true);   // async: the list fills in when it's done
@@ -138,7 +152,7 @@ void portalStart() {
   dns = new DNSServer();
   dns->start(53, "*", IPAddress(192, 168, 4, 1));
   web = new WebServer(80);
-  web->on("/", HTTP_GET, []() { sendForm(nullptr); });
+  web->on("/", HTTP_GET, []() { if (fromSetupNetwork()) sendForm(nullptr); });
   web->on("/save", HTTP_POST, handleSave);
   web->onNotFound(redirect);
   web->begin();

@@ -23,10 +23,19 @@ struct Requests;
 void netBegin();                        // load the settings; start if Sync is Wi-Fi
 void netApply();                        // (re)start or stop to match Sync and the settings
 void netLoop(Requests &req);            // service the link; incoming messages land in req
+void netSuspend();                      // drop the station and server link (setup mode takes the radio)
+// Sync was set to Wi-Fi on the board itself (the setup page), not by the companion. hello
+// says so until a cfg with "sync" arrives, so a companion on USB adopts the choice instead
+// of overwriting it with its own.
+void netSetBoardChoseSync(bool on);
+bool netBoardChoseSync();
 void netSave(const NetSettings &n);     // store new settings (netApply then uses them)
 // Why these settings can't be used, or nullptr when they can. Shared by the USB wifi message
 // and the setup page, so both apply the same rules.
 const char *netCheck(const NetSettings &n);
+// Stores a typed token lower-cased (a phone may capitalise it; the HMAC key must match the
+// companion's lower-case one exactly).
+void netSetToken(NetSettings &n, const char *typed);
 const NetSettings &netSettings();
 
 Print &netOut();                        // writes one message per line to the server

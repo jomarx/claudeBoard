@@ -1,7 +1,8 @@
 #pragma once
 #include <Arduino.h>
 
-// ButtonHold = BOOT held 5 s (after its ButtonLong at 0.7 s): opens Wi-Fi setup on the board.
+// BOOT: ButtonShort / ButtonLong (held over 0.7 s) on release; ButtonHold when held 5 s,
+// while still pressed, with no ButtonLong after it: opens Wi-Fi setup on the board.
 enum class InputKind { None, Tap, LongPress, ButtonShort, ButtonLong, ButtonHold };
 
 struct InputEvent {

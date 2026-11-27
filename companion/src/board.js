@@ -71,6 +71,9 @@ class BoardLink extends EventEmitter {
         // "apps" in hello = firmware 0.3+ (screens, relative steps, launcher, rotation 0-3);
         // "net" = 0.5+ (Wi-Fi sync, the wifi and net messages).
         this.status({ fw: m.fw, cfgCapable: !!m.cfg, screens: !!m.apps, netCapable: !!m.net });
+        // Sync was chosen on the board's own setup page: let main adopt it before 'ready'
+        // sends our settings back, or they would undo it.
+        if (m.syncFromBoard === 'wifi' || m.syncFromBoard === 'usb') this.emit('syncFromBoard', m.syncFromBoard);
         // An unasked hello after we started means it rebooted and lost its data.
         if (!wasReady) this.markReady();
         else if (!isReply) this.emit('ready');

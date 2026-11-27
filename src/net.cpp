@@ -13,6 +13,7 @@ static WebSocketsClient ws;
 static bool running = false;    // radio on, client started
 static bool serverUp = false;   // WebSocket open and the server accepted our challenge answer
 static Requests *pending = nullptr;
+static bool boardChoseSync = false;   // Sync set on the board's setup page (NVS "chose")
 
 // Print that sends each completed line as one WebSocket text message. Lines written while
 // the server is down are dropped: events then go to USB instead (protocolEventOut).
@@ -49,6 +50,7 @@ static void load() {
   Preferences p;
   p.begin("net", true);
   if (p.getBytesLength("cfg") == sizeof(NetSettings)) p.getBytes("cfg", &cfg, sizeof cfg);
+  boardChoseSync = p.getBool("chose", false);
   p.end();
 }
 
@@ -60,15 +62,43 @@ void netSave(const NetSettings &n) {
   p.end();
 }
 
+void netSetBoardChoseSync(bool on) {
+  if (on == boardChoseSync) return;
+  boardChoseSync = on;
+  Preferences p;
+  p.begin("net", false);
+  p.putBool("chose", on);
+  p.end();
+}
+
+bool netBoardChoseSync() { return boardChoseSync; }
+
+void netSuspend() {
+  if (!running) return;
+  ws.disconnect();
+  WiFi.disconnect(true);
+  running = false;
+  serverUp = false;
+}
+
 const char *netCheck(const NetSettings &n) {
   if (!n.ssid[0]) return "the Wi-Fi network name is missing";
   if (!n.ip || !n.gw || !n.mask) return "the board IP, gateway and subnet mask are all needed";
   if ((n.ip & n.mask) != (n.gw & n.mask)) return "the board IP is not in the gateway's subnet";
   if (!n.host[0]) return "the server address is missing";
+  if (n.port < 1024) return "the server port must be 1024 to 65535";
   if (strlen(n.token) != 32) return "the pairing token must be the 32 characters shown on the companion's page";
+  // Lower case only: the token is the HMAC key, and the companion's is lower case.
+  // (Both entry points lower-case what was typed first; see netSetToken.)
   for (const char *p = n.token; *p; p++)
-    if (!isxdigit((unsigned char)*p)) return "the pairing token has a character that is not 0-9 or a-f";
+    if (!isdigit((unsigned char)*p) && (*p < 'a' || *p > 'f')) return "the pairing token has a character that is not 0-9 or a-f";
   return nullptr;
+}
+
+void netSetToken(NetSettings &n, const char *typed) {
+  size_t i = 0;
+  for (; typed[i] && i < sizeof n.token - 1; i++) n.token[i] = tolower((unsigned char)typed[i]);
+  n.token[i] = 0;
 }
 
 // HMAC-SHA256(key, msg) as 64 lowercase hex characters.

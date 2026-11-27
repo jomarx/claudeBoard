@@ -405,6 +405,9 @@ function renderSync(s) {
   else if (s.lan.error) st = 'Not listening: ' + s.lan.error;
   else if (!boards.length) st = `Listening on port ${s.lan.port || s.config.lan.port}; no board connected yet.`;
   else st = boards.map((b) => `${b.path}${b.fw ? ' · fw ' + b.fw : ''}${b.ready ? '' : ' (starting)'}${b.rssi ? ' · ' + b.rssi + ' dBm' : ''}`).join(', ');
+  // The plugged-in board's own report, when it has one: is its setup network open?
+  const usb = s.boards.find((b) => b.link === 'usb');
+  if (usb && usb.net && usb.net.setup) st += ` · Setup open on the board: join ${usb.net.setupSsid} (password on its screen)`;
   $('lan-status').textContent = st;
   $('lan-token').textContent = s.config.lan.token;
 

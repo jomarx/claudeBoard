@@ -32,6 +32,7 @@ class Hub extends EventEmitter {
     link.on('status', () => this.emit('status', this.state));
     link.on('net', (n) => this.emit('net', n, link));
     link.on('boardError', (msg) => this.emit('boardError', msg, link));
+    link.on('syncFromBoard', (v) => this.emit('syncFromBoard', v, link));
   }
 
   // A socket that passed the token check in lan.js.

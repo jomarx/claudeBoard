@@ -185,6 +185,14 @@ async function run() {
     schedule();
   };
   board.on('ready', onReady);
+  // A board set up from a phone (its own setup page) switched itself to Wi-Fi: adopt that,
+  // rather than send our USB setting back. The settings are saved synchronously inside
+  // updateConfig, before this hello's 'ready' sends them.
+  board.on('syncFromBoard', (v, link) => {
+    if (link !== usbBoard || v === effective().board.sync) return;
+    log(`the board was set to ${v === 'wifi' ? 'Wi-Fi' : 'USB'} on its own setup page; following it`);
+    app.updateConfig({ board: { sync: v } }).catch((e) => log('sync from board:', e.message));
+  });
   // The USB board while Sync is Wi-Fi: it only needs its settings (so it knows the Sync mode).
   board.on('setupReady', () => usbBoard.send({ type: 'cfg', ...effective().board }));
   board.on('event', (m) => {
@@ -353,10 +361,15 @@ async function run() {
         case 'board-setup': {
           // Opens Wi-Fi setup on the plugged-in board (its own network and page), as BOOT held 5 s does.
           if (!usbBoard.state.connected) throw new Error('plug the board in over USB first');
-          usbBoard.send({ type: 'setup', open: body.open !== false });
-          await new Promise((r) => setTimeout(r, 300));
+          const open = body.open !== false;
+          usbBoard.send({ type: 'setup', open });
+          await new Promise((r) => setTimeout(r, 400));
           usbBoard.send({ type: 'net' });
-          await new Promise((r) => setTimeout(r, 300));
+          await new Promise((r) => setTimeout(r, 400));
+          // The net reply says whether it worked; older firmware answers "unknown type".
+          const n = usbBoard.state.net;
+          if (open && !(n && n.setup)) throw new Error('the board did not open setup (firmware 0.5.0 or later needed)');
+          if (open) log(`setup network open on the board: ${n.setupSsid}`);
           break;
         }
         case 'lan-token': {

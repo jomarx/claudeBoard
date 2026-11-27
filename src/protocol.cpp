@@ -21,9 +21,12 @@ Print &protocolEventOut() {
 }
 
 void protocolSendHello(Print &out, bool overWifi) {
+  // syncFromBoard: Sync was set on the board itself (setup page); a companion adopts it
+  // rather than sending its own back. Cleared by the next cfg that carries sync.
   out.printf("{\"type\":\"hello\",\"fw\":\"%s\",\"w\":240,\"h\":320,\"cfg\":true,\"apps\":true,"
-             "\"net\":true,\"link\":\"%s\"}\n",
-             FW_VERSION, overWifi ? "wifi" : "usb");
+             "\"net\":true,\"link\":\"%s\"%s}\n",
+             FW_VERSION, overWifi ? "wifi" : "usb",
+             netBoardChoseSync() ? ",\"syncFromBoard\":\"wifi\"" : "");
 }
 
 // Copies text for the screen: the board fonts are ASCII only, so anything else shows as '?'.
@@ -101,7 +104,7 @@ static bool applyWifi(Print &out, JsonObjectConst d, Link link) {
   strlcpy(n.ssid, d["ssid"] | "", sizeof n.ssid);
   strlcpy(n.pass, d["pass"] | "", sizeof n.pass);
   strlcpy(n.host, d["host"] | "", sizeof n.host);
-  strlcpy(n.token, d["token"] | "", sizeof n.token);
+  netSetToken(n, d["token"] | "");
   n.port = constrain(d["port"] | 47821, 1, 65535);
   n.ip = (uint32_t)ip;
   n.gw = (uint32_t)gw;
@@ -196,6 +199,7 @@ static void applyConfig(JsonObjectConst d) {
   if (sync) {
     if (!strcmp(sync, "usb")) g_settings.sync = SyncMode::Usb;
     else if (!strcmp(sync, "wifi")) g_settings.sync = SyncMode::Wifi;
+    netSetBoardChoseSync(false);   // the companion has spoken; it knows the choice now
   }
 }
 

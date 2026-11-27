@@ -94,7 +94,7 @@ static bool tDown = false, tLongSent = false;
 static uint32_t tStart = 0, tLastSeen = 0;
 static int tx = 0, ty = 0;
 
-static bool bDown = false, bLongSent = false, bHoldSent = false;
+static bool bDown = false, bHoldSent = false;
 static uint32_t bStart = 0;
 
 void inputBegin() {
@@ -114,22 +114,20 @@ InputEvent inputPoll() {
     if (!pressed && now > 1500) bArmed = true;
     pressed = false;
   }
+  // Short and long presses are decided on release, so a 5 s hold (Wi-Fi setup) never sends
+  // the long press (brightness) on its way there; the hold fires while still pressed.
   if (pressed && !bDown) {
-    bDown = true; bLongSent = false; bHoldSent = false; bStart = now;
-  } else if (pressed && bDown && !bLongSent && now - bStart > LONG_MS) {
-    bLongSent = true;
-    ev.kind = InputKind::ButtonLong;
-    return ev;
-  } else if (pressed && bDown && bLongSent && !bHoldSent && now - bStart > HOLD_MS) {
+    bDown = true; bHoldSent = false; bStart = now;
+  } else if (pressed && bDown && !bHoldSent && now - bStart > HOLD_MS) {
     bHoldSent = true;
     ev.kind = InputKind::ButtonHold;
     return ev;
   } else if (!pressed && bDown) {
     bDown = false;
-    if (!bLongSent && now - bStart > DEBOUNCE_MS) {
-      ev.kind = InputKind::ButtonShort;
-      return ev;
-    }
+    const uint32_t held = now - bStart;
+    if (bHoldSent || held <= DEBOUNCE_MS) return ev;
+    ev.kind = held > LONG_MS ? InputKind::ButtonLong : InputKind::ButtonShort;
+    return ev;
   }
 
   // Touch. A finger is "released" after 60 ms without a reading, which

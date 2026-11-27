@@ -57,10 +57,14 @@
 //
 // Device -> host
 //   {"type":"hello","fw":"0.5.0","w":240,"h":320,"cfg":true,"apps":true,"net":true,
-//    "link":"usb"|"wifi"}                              (on boot, on Wi-Fi connect, on request)
+//    "link":"usb"|"wifi","syncFromBoard":"wifi"}       (on boot, on Wi-Fi connect, on request)
+//       syncFromBoard (only when set): Sync was chosen on the board's own setup page; the
+//       companion adopts it instead of sending its own. The next cfg with "sync" clears it.
 //   {"type":"net","sync":"usb"|"wifi","configured":true,"ssid":"...","ip":"...","gw":"...",
 //    "mask":"...","dns":"...","host":"...","port":47821,"wifi":"connected"|"connecting"|"off",
-//    "server":"connected"|"not connected","rssi":-60,"heap":...,"largest":...}
+//    "server":"connected"|"not connected","rssi":-60,"setup":false,"setupSsid":"claudeBoard-XXXX",
+//    "heap":...,"largest":...}   setup = the setup network is open; setupSsid only then (its
+//    password stays on the board's screen)
 //                                                      (never the password or the token)
 //   {"type":"cfg",...all settings above...}            (after hello and after every cfg)
 //   {"type":"ack","seq":1}
