@@ -94,7 +94,7 @@ alert screen and the "you're back" screen without waiting for real usage.
 
 ## Controls
 
-Five screens: **Main** (gauges), **Today** (daily detail), **Clock** (digital or analog, picked
+Five screens: **Main** (gauges), **Today** (daily detail), **Clock** (digital, analog, rings, flip, words or binary, picked
 under "Clock style" on the settings page), **Calendar** (this month, today
 circled) and **Apps** (a launcher). Each has a bar along the bottom: previous, next, the page
 dots, and play/pause for the automatic screen change.

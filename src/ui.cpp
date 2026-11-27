@@ -486,6 +486,183 @@ static void drawClockAnalog(const struct tm &tm) {
   g.circle(cx, cy, 2, C_BG);
 }
 
+// The displayed hour (12-hour when that's set), and "am"/"pm" or null.
+static int clockHour(const struct tm &tm, const char **ampm) {
+  *ampm = nullptr;
+  if (g_settings.h24) return tm.tm_hour;
+  *ampm = tm.tm_hour < 12 ? "am" : "pm";
+  return tm.tm_hour % 12 ? tm.tm_hour % 12 : 12;
+}
+
+// Arc from 12 o'clock clockwise over frac of a turn. TFT_eSPI's 0 is 6 o'clock, so
+// 12 o'clock is 180 and an arc past 6 o'clock again is drawn in two pieces.
+static void arcFrom12(int cx, int cy, int r, int ir, float frac, uint16_t c) {
+  const int span = (int)(constrain(frac, 0.0f, 1.0f) * 360);
+  if (span < 1) return;
+  const int end = 180 + span;
+  g.arc(cx, cy, r, ir, 180, min(end, 360), c, C_BG, false);
+  if (end > 360) g.arc(cx, cy, r, ir, 0, end - 360, c, C_BG, false);
+}
+
+// Rings: hours, minutes, seconds as concentric arcs filling clockwise, time in the middle.
+static void drawClockRings(const struct tm &tm) {
+  const int cx = land ? 104 : W / 2, cy = land ? 116 : 150, r = land ? 88 : 104;
+  const float mins = tm.tm_min + tm.tm_sec / 60.0f;
+  const float hours = g_settings.h24 ? (tm.tm_hour + mins / 60) / 24 : ((tm.tm_hour % 12) + mins / 60) / 12;
+  struct Ring { float frac; uint16_t c; int w; const char *label; int value; };
+  const char *ampm;
+  const int hour = clockHour(tm, &ampm);
+  const Ring rings[3] = {{hours, C_CORAL, 10, "hours", hour},
+                         {mins / 60, C_GREEN, 8, "minutes", tm.tm_min},
+                         {tm.tm_sec / 60.0f, C_AMBER, 6, "seconds", tm.tm_sec}};
+  int rr = r;
+  for (const Ring &ring : rings) {
+    g.arc(cx, cy, rr, rr - ring.w, 0, 360, C_TRACK, C_BG, false);
+    arcFrom12(cx, cy, rr, rr - ring.w, ring.frac, ring.c);
+    rr -= ring.w + 5;
+  }
+
+  char t[8];
+  snprintf(t, sizeof t, g_settings.h24 ? "%02d:%02d" : "%d:%02d", hour, tm.tm_min);
+  if (land) {
+    // The middle is too small for font 6 here; a legend on the right carries the detail.
+    g.text(t, cx, cy, 4, C_TEXT, C_BG, MC_DATUM);
+    if (ampm) g.text(ampm, cx, cy + 20, 2, C_MUTED, C_BG, TC_DATUM);
+    int y = 48;
+    for (const Ring &ring : rings) {
+      char v[4];
+      snprintf(v, sizeof v, "%02d", ring.value);
+      g.circle(222, y + 8, 5, ring.c);
+      g.text(ring.label, 234, y, 2, C_MUTED, C_BG);
+      g.text(v, 234, y + 18, 4, C_TEXT, C_BG);
+      y += 52;
+    }
+  } else {
+    g.text(t, cx, cy, 6, C_TEXT, C_BG, MC_DATUM);
+    if (ampm) g.text(ampm, cx, cy + 30, 2, C_MUTED, C_BG, TC_DATUM);
+  }
+}
+
+// One flip-clock card: the digits, a split across the middle, hinge notches at the sides.
+static void flipCard(int x, int y, int w, int h, const char *s) {
+  g.rrect(x, y, w, h, 10, C_TRACK);
+  g.text(s, x + w / 2, y + h / 2 + 2, 8, C_TEXT, C_TRACK, MC_DATUM);
+  g.rect(x, y + h / 2 - 1, w, 2, C_BG);
+  g.circle(x, y + h / 2, 4, C_BG);
+  g.circle(x + w - 1, y + h / 2, 4, C_BG);
+}
+
+static void drawClockFlip(const struct tm &tm) {
+  const char *ampm;
+  const int hour = clockHour(tm, &ampm);
+  char hh[4], mm[4];
+  snprintf(hh, sizeof hh, g_settings.h24 ? "%02d" : "%d", hour);
+  snprintf(mm, sizeof mm, "%02d", tm.tm_min);
+  int x, y, w, h;
+  if (land) {
+    x = 14; y = 40; w = 140; h = 112;
+    flipCard(x, y, w, h, hh);
+    flipCard(W - 14 - w, y, w, h, mm);
+    secondsBar(172, W - 28, tm.tm_sec);
+  } else {
+    w = 170; h = 100; x = (W - w) / 2; y = 34;
+    flipCard(x, y, w, h, hh);
+    flipCard(x, y + h + 10, w, h, mm);
+    secondsBar(258, w, tm.tm_sec);
+  }
+  if (ampm) g.text(ampm, x + w - 12, y + 8, 2, C_MUTED, C_TRACK, TR_DATUM);
+}
+
+// Words: a word-clock grid, the phrase for the time lit and the rest faint. The four dots
+// underneath count the minutes past the last five.
+enum : uint8_t {
+  WD_IT, WD_IS, WD_HALF, WD_TEN_M, WD_QUARTER, WD_TWENTY, WD_FIVE_M, WD_MINUTES, WD_TO, WD_PAST,
+  WD_H1, WD_H2, WD_H3, WD_H4, WD_H5, WD_H6, WD_H7, WD_H8, WD_H9, WD_H10, WD_H11, WD_H12,
+  WD_OCLOCK, WD_COUNT, WD_END = 0xFF
+};
+static const char *const WORD_TEXT[WD_COUNT] = {
+  "it", "is", "half", "ten", "quarter", "twenty", "five", "minutes", "to", "past",
+  "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve",
+  "o'clock"};
+// Lines of word ids for each orientation, WD_END-terminated.
+static const uint8_t WORDS_PORTRAIT[][5] = {
+  {WD_IT, WD_IS, WD_HALF, WD_TEN_M, WD_END}, {WD_QUARTER, WD_TWENTY, WD_END},
+  {WD_FIVE_M, WD_MINUTES, WD_TO, WD_END},     {WD_PAST, WD_H1, WD_H3, WD_END},
+  {WD_H2, WD_H4, WD_H5, WD_END},              {WD_H6, WD_H7, WD_H8, WD_END},
+  {WD_H9, WD_H10, WD_H11, WD_END},            {WD_H12, WD_OCLOCK, WD_END}};
+static const uint8_t WORDS_LAND[][6] = {
+  {WD_IT, WD_IS, WD_HALF, WD_TEN_M, WD_QUARTER, WD_END}, {WD_TWENTY, WD_FIVE_M, WD_MINUTES, WD_TO, WD_END},
+  {WD_PAST, WD_H1, WD_H2, WD_H3, WD_H4, WD_END},         {WD_H5, WD_H6, WD_H7, WD_H8, WD_END},
+  {WD_H9, WD_H10, WD_H11, WD_H12, WD_END},               {WD_OCLOCK, WD_END}};
+
+static void drawClockWords(const struct tm &tm) {
+  bool lit[WD_COUNT] = {};
+  lit[WD_IT] = lit[WD_IS] = true;
+  const int m5 = tm.tm_min / 5;
+  int hour = tm.tm_hour % 12;
+  if (m5 >= 7) hour = (hour + 1) % 12;   // from :35 on it's "... to" the next hour
+  // The minute words for each five minutes, :00 to :55.
+  static const uint8_t phrase[12][4] = {
+    {WD_OCLOCK, WD_END},                           {WD_FIVE_M, WD_MINUTES, WD_PAST, WD_END},
+    {WD_TEN_M, WD_PAST, WD_END},                   {WD_QUARTER, WD_PAST, WD_END},
+    {WD_TWENTY, WD_MINUTES, WD_PAST, WD_END},      {WD_TWENTY, WD_FIVE_M, WD_MINUTES, WD_PAST},
+    {WD_HALF, WD_PAST, WD_END},                    {WD_TWENTY, WD_FIVE_M, WD_MINUTES, WD_TO},
+    {WD_TWENTY, WD_MINUTES, WD_TO, WD_END},        {WD_QUARTER, WD_TO, WD_END},
+    {WD_TEN_M, WD_TO, WD_END},                     {WD_FIVE_M, WD_MINUTES, WD_TO, WD_END}};
+  for (uint8_t id : phrase[m5]) {
+    if (id == WD_END) break;
+    lit[id] = true;
+  }
+  const int hourWord = WD_H1 + (hour + 11) % 12;   // hour 0 reads "twelve"
+  lit[hourWord] = true;
+
+  const int lines = land ? 6 : 8;
+  auto lineAt = [&](int i) -> const uint8_t * { return land ? WORDS_LAND[i] : WORDS_PORTRAIT[i]; };
+  // Font 4 if every line fits the width, otherwise font 2 for all of them.
+  int font = 4;
+  for (int i = 0; i < lines && font == 4; i++) {
+    int w = 0;
+    for (const uint8_t *p = lineAt(i); *p != WD_END; p++) w += g.width(WORD_TEXT[*p], 4) + g.width(" ", 4);
+    if (w > W - 16) font = 2;
+  }
+  const int lh = font == 4 ? (land ? 26 : 27) : 20, top = land ? 30 : 34, gap = g.width(" ", font);
+  const uint16_t faint = rgb(62, 62, 58);
+  for (int i = 0; i < lines; i++) {
+    const uint8_t *line = lineAt(i);
+    int w = -gap;
+    for (const uint8_t *p = line; *p != WD_END; p++) w += g.width(WORD_TEXT[*p], font) + gap;
+    int x = (W - w) / 2;
+    for (const uint8_t *p = line; *p != WD_END; p++) {
+      const uint16_t c = !lit[*p] ? faint : *p == hourWord ? C_CORAL : C_TEXT;
+      x += g.text(WORD_TEXT[*p], x, top + i * lh, font, c, C_BG) + gap;
+    }
+  }
+  const int dy = top + lines * lh + (land ? 8 : 12), extra = tm.tm_min % 5;
+  for (int i = 0; i < 4; i++) g.circle(W / 2 - 27 + i * 18, dy, 3, i < extra ? C_CORAL : C_TRACK);
+}
+
+// Binary: BCD columns for HH MM SS, 8-4-2-1 from the top, the digits underneath.
+static void drawClockBinary(const struct tm &tm) {
+  const char *ampm;
+  const int hour = clockHour(tm, &ampm);
+  const int digits[6] = {hour / 10, hour % 10, tm.tm_min / 10, tm.tm_min % 10, tm.tm_sec / 10, tm.tm_sec % 10};
+  static const uint8_t bits[6] = {2, 4, 3, 4, 3, 4};   // a tens digit never needs all four
+  const uint16_t colors[3] = {C_CORAL, C_GREEN, C_AMBER};
+  const int sp = land ? 44 : 34, pair = land ? 14 : 10, r = land ? 13 : 11;
+  const int x0 = (W - (5 * sp + 2 * pair)) / 2, top = land ? 46 : 58, rs = land ? 34 : 36;
+  for (int i = 0; i < 6; i++) {
+    const int x = x0 + i * sp + (i / 2) * pair;
+    for (int b = 0; b < bits[i]; b++) {
+      const bool on = digits[i] & (1 << b);
+      g.circle(x, top + (3 - b) * rs, r, on ? colors[i / 2] : C_TRACK);
+    }
+    char d[2] = {(char)('0' + digits[i]), 0};
+    g.text(d, x, top + 3 * rs + r + 10, 4, C_MUTED, C_BG, TC_DATUM);
+  }
+  // Under the header on the right: below the digits there's no room above the nav bar.
+  if (ampm) g.text(ampm, W - 12, 30, 2, C_MUTED, C_BG, TR_DATUM);
+}
+
 static void drawClock() {
   g.fill(C_BG);
   if (!g_clock.synced()) {
@@ -501,8 +678,14 @@ static void drawClock() {
   time_t t = g_clock.localNow();
   struct tm tm;
   gmtime_r(&t, &tm);
-  if (g_settings.clock == ClockStyle::Analog) drawClockAnalog(tm);
-  else drawClockDigital(tm);
+  switch (g_settings.clock) {
+    case ClockStyle::Analog: drawClockAnalog(tm); break;
+    case ClockStyle::Rings: drawClockRings(tm); break;
+    case ClockStyle::Flip: drawClockFlip(tm); break;
+    case ClockStyle::Words: drawClockWords(tm); break;
+    case ClockStyle::Binary: drawClockBinary(tm); break;
+    default: drawClockDigital(tm); break;
+  }
   navBar((int)View::Clock);
 }
 

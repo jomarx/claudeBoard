@@ -26,7 +26,7 @@ const DEFAULTS = {
     cycle: 0,             // seconds between automatic screen changes, 0 = off
     fx: 'none',           // 'none' | 'wipe' | 'fade'
     dim: 120,             // idle seconds before dimming, 0 = never
-    clock: 'digital',     // clock screen face: 'digital' | 'analog'
+    clock: 'digital',     // clock screen face, one of CLOCK_STYLES
   },
 };
 
@@ -36,6 +36,7 @@ const clampInt = (v, lo, hi, def) => {
 };
 
 const MAX_APPS = 8;   // the board's launcher grid (MAX_APPS in src/model.h)
+const CLOCK_STYLES = ['digital', 'analog', 'rings', 'flip', 'words', 'binary'];   // CLOCK_NAMES in src/protocol.cpp
 
 // One launcher tile, or null if it has no name or nothing to open. The name is what the
 // board shows (15 chars, its fonts are ASCII); path is a program, file, folder or URL.
@@ -70,7 +71,7 @@ function normalize(input, base = DEFAULTS) {
       cycle: clampInt(b.cycle, 0, 3600, bb.cycle),
       fx: ['none', 'wipe', 'fade'].includes(b.fx) ? b.fx : bb.fx,
       dim: clampInt(b.dim, 0, 3600, bb.dim),
-      clock: ['digital', 'analog'].includes(b.clock) ? b.clock : bb.clock,
+      clock: CLOCK_STYLES.includes(b.clock) ? b.clock : bb.clock,
     },
   };
 }

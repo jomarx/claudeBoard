@@ -33,7 +33,8 @@ struct UsageData {
 };
 
 enum class Fx : uint8_t { None = 0, Wipe = 1, Fade = 2 };
-enum class ClockStyle : uint8_t { Digital = 0, Analog = 1 };
+enum class ClockStyle : uint8_t { Digital = 0, Analog = 1, Rings = 2, Flip = 3, Words = 4, Binary = 5 };
+#define CLOCK_STYLES 6
 
 // Saved in NVS (settings.cpp); the companion can change every field with a cfg frame.
 struct Settings {

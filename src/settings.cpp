@@ -18,7 +18,8 @@ void settingsLoad() {
     s.cycle = prefs.getUShort("cycle", s.cycle);
     uint8_t fx = prefs.getUChar("fx", 0);
     s.fx = fx <= 2 ? (Fx)fx : Fx::None;
-    s.clock = prefs.getUChar("clock", 0) == 1 ? ClockStyle::Analog : ClockStyle::Digital;
+    uint8_t clock = prefs.getUChar("clock", 0);
+    s.clock = clock < CLOCK_STYLES ? (ClockStyle)clock : ClockStyle::Digital;
     s.dim = prefs.getUShort("dim", s.dim);
     g_settings = s;
   }

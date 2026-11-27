@@ -16,7 +16,7 @@ void protocolSendHello() {
 }
 
 static const char *FX_NAMES[] = {"none", "wipe", "fade"};
-static const char *CLOCK_NAMES[] = {"digital", "analog"};
+static const char *CLOCK_NAMES[CLOCK_STYLES] = {"digital", "analog", "rings", "flip", "words", "binary"};
 
 void protocolSendSettings() {
   const Settings &s = g_settings;
@@ -103,7 +103,7 @@ static void applyConfig(JsonObjectConst d) {
   }
   const char *clock = d["clock"];
   if (clock) {
-    for (int i = 0; i < 2; i++)
+    for (int i = 0; i < CLOCK_STYLES; i++)
       if (!strcmp(clock, CLOCK_NAMES[i])) g_settings.clock = (ClockStyle)i;
   }
 }
