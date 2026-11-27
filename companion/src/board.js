@@ -24,11 +24,13 @@ async function listPorts() {
     .sort((a, b) => a.path.localeCompare(b.path, undefined, { numeric: true }));
 }
 
+// Auto-detect takes only the meter's own chip, a CH340 (1a86:7523). Other USB-serial
+// chips, even the CH9102 from the same vendor, are some other device: writing frames to
+// one would be sending junk to whatever it is. Pick such a port by hand if needed.
 async function autoPort() {
   const ports = await listPorts();
-  const rank = (p) => (p.chip === 'CH340' ? 0 : p.chip ? 1 : 9);
-  const best = ports.filter((p) => p.chip).sort((a, b) => rank(a) - rank(b))[0];
-  return best ? best.path : null;
+  const board = ports.find((p) => p.chip === 'CH340');
+  return board ? board.path : null;
 }
 
 class Board extends EventEmitter {
