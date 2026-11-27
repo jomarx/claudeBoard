@@ -16,20 +16,26 @@
 //             "hourly":[0,0,...24 values],
 //             "models":[{"n":"Opus 5.5","p":68},{"n":"Sonnet 5.5","p":29}]}}
 //   {"type":"cfg","brightness":200,"alert1":80,"alert2":90,"h24":true,
-//    "rot":0,"cycle":0,"fx":"none","dim":120,"clock":"digital"}  -> device answers with its cfg
+//    "rot":0,"cycle":0,"fx":"none","dim":120,"clock":"digital","led":"usage","ledlvl":60}
+//                                                      -> device answers with its cfg
 //       rot: 0 portrait, 1 landscape, 2 portrait flipped, 3 landscape flipped
 //       (hello's w/h stay the panel's native 240x320); cycle: seconds between automatic page
 //       changes (0 off); fx: "none" | "wipe" | "fade"; dim: idle seconds (0 never);
 //       clock: the clock screen's face, "digital" | "analog" | "rings" | "flip" | "words" |
-//       "binary".
+//       "binary"; led: the back LED, "off" | "usage" | "alerts"; ledlvl: its brightness 0-255.
 //       Every field is optional; {"type":"cfg"} alone just asks for the current values.
 //       Settings are saved on the board and survive a reboot.
 //   {"type":"screen","n":0}                            -> jump to a screen: 0 main, 1 today,
-//                                                         2 clock, 3 calendar, 4 launcher
+//                                                         2 clock, 3 weather, 4 calendar,
+//                                                         5 launcher
 //   {"type":"screen","step":1}                         -> next (1) or previous (-1) screen
 //   {"type":"apps","list":["Outlook","Chrome"]}        -> launcher tile names, at most 8,
 //       15 printable ASCII chars each; the list replaces the previous one. The board
 //       only knows names: what a tile opens stays on the PC.
+//   {"type":"weather","place":"Manila","t":31,"feels":36,"hum":70,"wind":12,"code":3,
+//    "day":1,"hi":33,"lo":26,"rain":40,"at":1764143520}
+//       -> current weather: degrees C, km/h, WMO code, rain = today's chance % (-1 unknown),
+//       at = observation time. {"type":"weather","valid":false} clears it.
 //   {"type":"preview","view":"alert"|"back"}           -> show an overlay to test it
 //
 // Device -> host
@@ -51,6 +57,7 @@ struct Requests {
   int screen = -1;        // page to jump to
   int step = 0;           // or pages to move by (+1 / -1)
   bool apps = false;      // the launcher list changed
+  bool weather = false;   // a weather frame arrived
   int preview = -1;       // 0 = alert, 1 = back
 };
 

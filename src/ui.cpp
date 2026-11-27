@@ -691,6 +691,173 @@ static void drawClock() {
   navBar((int)View::Clock);
 }
 
+// ---------- weather ----------
+
+// Draws s with every '`' shown as a degree sign, which the built-in fonts don't have.
+// Left-aligned at x, or centered on x; returns the width.
+static int textDeg(const char *s, int x, int y, int font, uint16_t fg, bool center) {
+  const int dr = font >= 6 ? 5 : font >= 4 ? 3 : 2;   // ring radius
+  const int dw = dr * 2 + 3, dy = font >= 6 ? dr + 4 : dr + 2;
+  int x0 = x, total = 0;
+  char seg[32];
+  for (int pass = 0; pass < 2; pass++) {   // measure, then draw
+    int cx = x0;
+    for (const char *p = s; *p;) {
+      int n = 0;
+      while (p[n] && p[n] != '`' && n < (int)sizeof seg - 1) n++;
+      if (n) {
+        memcpy(seg, p, n);
+        seg[n] = 0;
+        if (pass) g.text(seg, cx, y, font, fg, C_BG);
+        cx += g.width(seg, font);
+        p += n;
+      }
+      if (*p == '`') {
+        if (pass) {
+          g.circle(cx + dr + 1, y + dy, dr, fg);
+          g.circle(cx + dr + 1, y + dy, max(dr - (font >= 6 ? 2 : 1), 1), C_BG);
+        }
+        cx += dw;
+        p++;
+      }
+    }
+    if (!pass) {
+      total = cx - x0;
+      x0 = center ? x - total / 2 : x;
+    }
+  }
+  return total;
+}
+
+enum class Sky : uint8_t { Sun, Moon, PartSun, PartMoon, Cloud, Fog, Rain, Snow, Storm };
+
+// WMO weather code -> icon and a short description.
+static Sky skyFor(uint8_t code, bool day, const char **desc) {
+  if (code == 0) { *desc = day ? "Sunny" : "Clear"; return day ? Sky::Sun : Sky::Moon; }
+  if (code == 1) { *desc = "Mainly clear"; return day ? Sky::Sun : Sky::Moon; }
+  if (code == 2) { *desc = "Partly cloudy"; return day ? Sky::PartSun : Sky::PartMoon; }
+  if (code == 3) { *desc = "Overcast"; return Sky::Cloud; }
+  if (code == 45 || code == 48) { *desc = "Fog"; return Sky::Fog; }
+  if (code >= 51 && code <= 57) { *desc = "Drizzle"; return Sky::Rain; }
+  if (code >= 61 && code <= 67) { *desc = "Rain"; return Sky::Rain; }
+  if (code >= 71 && code <= 77) { *desc = "Snow"; return Sky::Snow; }
+  if (code >= 80 && code <= 82) { *desc = "Showers"; return Sky::Rain; }
+  if (code == 85 || code == 86) { *desc = "Snow showers"; return Sky::Snow; }
+  if (code >= 95) { *desc = "Thunderstorm"; return Sky::Storm; }
+  *desc = "Cloudy";
+  return Sky::Cloud;
+}
+
+static const uint16_t C_SKY_CLOUD = rgb(200, 198, 190), C_SKY_DARK = rgb(120, 119, 112);
+static const uint16_t C_SKY_RAIN = rgb(85, 160, 230), C_SKY_MOON = rgb(230, 225, 200);
+
+static void sun(int cx, int cy, int r) {
+  for (int i = 0; i < 8; i++) {
+    const float a = i * 45 * DEG_TO_RAD, sx = sinf(a), sy = cosf(a);
+    g.wline(cx + sx * (r + 5), cy + sy * (r + 5), cx + sx * (r + 12), cy + sy * (r + 12), 3, C_AMBER, C_BG);
+  }
+  g.circle(cx, cy, r, C_AMBER);
+}
+
+static void moon(int cx, int cy, int r) {
+  g.circle(cx, cy, r, C_SKY_MOON);
+  g.circle(cx + r / 2, cy - r / 3, r - 3, C_BG);   // the dark bite makes the crescent
+}
+
+// A cloud around (cx, cy), about 60 x 40.
+static void cloud(int cx, int cy, uint16_t c) {
+  g.circle(cx - 14, cy + 2, 13, c);
+  g.circle(cx + 3, cy - 7, 17, c);
+  g.circle(cx + 18, cy + 4, 12, c);
+  g.rrect(cx - 28, cy + 2, 58, 15, 7, c);
+}
+
+static void skyIcon(Sky k, int cx, int cy) {
+  switch (k) {
+    case Sky::Sun: sun(cx, cy, 18); break;
+    case Sky::Moon: moon(cx, cy, 20); break;
+    case Sky::PartSun: sun(cx - 12, cy - 12, 13); cloud(cx + 6, cy + 8, C_SKY_CLOUD); break;
+    case Sky::PartMoon: moon(cx - 12, cy - 12, 15); cloud(cx + 6, cy + 8, C_SKY_CLOUD); break;
+    case Sky::Cloud: cloud(cx, cy, C_SKY_CLOUD); break;
+    case Sky::Fog:
+      for (int i = 0; i < 4; i++) g.rrect(cx - 30 + (i % 2) * 8, cy - 16 + i * 11, 52, 6, 3, C_SKY_CLOUD);
+      break;
+    case Sky::Rain:
+      cloud(cx, cy - 10, C_SKY_CLOUD);
+      for (int i = 0; i < 4; i++) g.wline(cx - 18 + i * 12, cy + 14, cx - 23 + i * 12, cy + 26, 3, C_SKY_RAIN, C_BG);
+      break;
+    case Sky::Snow:
+      cloud(cx, cy - 10, C_SKY_CLOUD);
+      for (int i = 0; i < 4; i++) g.circle(cx - 18 + i * 12, cy + 18 + (i % 2) * 6, 3, C_TEXT);
+      break;
+    case Sky::Storm:
+      cloud(cx, cy - 10, C_SKY_DARK);
+      g.tri(cx + 2, cy + 6, cx - 9, cy + 22, cx, cy + 22, C_AMBER);
+      g.tri(cx - 2, cy + 20, cx + 8, cy + 20, cx - 5, cy + 34, C_AMBER);
+      break;
+  }
+}
+
+static void drawWeather() {
+  g.fill(C_BG);
+  const WeatherData &w = g_weather;
+  header(w.valid && w.place[0] ? w.place : "Weather", C_BG);
+  if (!w.valid) {
+    g.text("No weather yet", W / 2, H / 2 - 50, 4, C_TEXT, C_BG, TC_DATUM);
+    g.text("Set a location on the", W / 2, H / 2 - 10, 2, C_MUTED, C_BG, TC_DATUM);
+    g.text("companion's settings page.", W / 2, H / 2 + 8, 2, C_MUTED, C_BG, TC_DATUM);
+    navBar((int)View::Weather);
+    return;
+  }
+
+  const char *desc;
+  const Sky sky = skyFor(w.code, w.day, &desc);
+  char temp[12], l1[40], l2[40], l3[40];
+  snprintf(temp, sizeof temp, "%d`", w.temp);
+  snprintf(l1, sizeof l1, "feels %d`   humidity %u%%", w.feels, w.hum);
+  snprintf(l2, sizeof l2, "high %d`   low %d`", w.hi, w.lo);
+  if (w.rain >= 0) snprintf(l3, sizeof l3, "wind %u km/h   rain %d%%", w.wind, w.rain);
+  else snprintf(l3, sizeof l3, "wind %u km/h", w.wind);
+  // The companion refreshes every 15 minutes; much older means it lost the connection.
+  const bool stale = g_clock.synced() && w.at && g_clock.now() > w.at + 3 * 3600;
+  if (stale) {
+    char when[10];
+    fmtClock(when, sizeof when, w.at + g_clock.tzOffset);
+    snprintf(l3, sizeof l3, "last update %s", when);
+  }
+  const uint16_t descColor = stale ? C_AMBER : C_TEXT;
+
+  if (land) {
+    // Icon on the left; temperature, condition and details in a column on the right.
+    skyIcon(sky, 80, 104);
+    const int x = 160;
+    textDeg(temp, x, 34, 6, C_TEXT, false);
+    g.text(desc, x, 90, 4, descColor, C_BG);
+    // The column is narrow: one detail per line.
+    char a[24], b[24];
+    snprintf(a, sizeof a, "feels %d`  %u%%", w.feels, w.hum);
+    snprintf(b, sizeof b, "wind %u km/h", w.wind);
+    textDeg(a, x, 124, 2, C_MUTED, false);
+    textDeg(l2, x, 142, 2, C_MUTED, false);
+    if (stale) g.text(l3, x, 160, 2, C_AMBER, C_BG);
+    else {
+      g.text(b, x, 160, 2, C_MUTED, C_BG);
+      if (w.rain >= 0) {
+        snprintf(b, sizeof b, "rain %d%% today", w.rain);
+        g.text(b, x, 178, 2, C_MUTED, C_BG);
+      }
+    }
+  } else {
+    skyIcon(sky, W / 2, 78);
+    textDeg(temp, W / 2, 124, 6, C_TEXT, true);
+    g.text(desc, W / 2, 180, 4, descColor, C_BG, TC_DATUM);
+    textDeg(l1, W / 2, 216, 2, C_MUTED, true);
+    textDeg(l2, W / 2, 234, 2, C_MUTED, true);
+    g.text(l3, W / 2, 252, 2, stale ? C_AMBER : C_MUTED, C_BG, TC_DATUM);
+  }
+  navBar((int)View::Weather);
+}
+
 // ---------- calendar ----------
 
 // Days since 1970-01-01 for a civil date (H. Hinnant's algorithm), m 1..12.
@@ -943,6 +1110,7 @@ static void drawBand(View v, const AlertInfo &alert, int band) {
     case View::Alert: drawAlert(alert); break;
     case View::Back: drawBack(); break;
     case View::Clock: drawClock(); break;
+    case View::Weather: drawWeather(); break;
     case View::Calendar: drawCalendar(); break;
     case View::Launcher: drawLauncher(); break;
     case View::Today:

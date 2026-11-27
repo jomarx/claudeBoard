@@ -5,10 +5,11 @@
 enum class View : uint8_t {
   Main = 0,      // gauges
   Today = 1,     // daily detail
-  Clock = 2,     // big clock, digital or analog (Settings::clock)
-  Calendar = 3,  // month grid
-  Launcher = 4,  // app tiles that open things on the PC
-  PageCount = 5, // number of pageable screens
+  Clock = 2,     // big clock in one of several styles (Settings::clock)
+  Weather = 3,   // current weather for the place set on the companion
+  Calendar = 4,  // month grid
+  Launcher = 5,  // app tiles that open things on the PC
+  PageCount = 6, // number of pageable screens
   Alert,         // limit alert overlay
   Back,          // "limit has reset" overlay
 };

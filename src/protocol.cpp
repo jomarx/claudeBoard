@@ -17,13 +17,16 @@ void protocolSendHello() {
 
 static const char *FX_NAMES[] = {"none", "wipe", "fade"};
 static const char *CLOCK_NAMES[CLOCK_STYLES] = {"digital", "analog", "rings", "flip", "words", "binary"};
+static const char *LED_NAMES[LED_MODES] = {"off", "usage", "alerts"};
 
 void protocolSendSettings() {
   const Settings &s = g_settings;
   Serial.printf("{\"type\":\"cfg\",\"brightness\":%u,\"alert1\":%u,\"alert2\":%u,\"h24\":%s,"
-                "\"rot\":%u,\"cycle\":%u,\"fx\":\"%s\",\"dim\":%u,\"clock\":\"%s\"}\n",
+                "\"rot\":%u,\"cycle\":%u,\"fx\":\"%s\",\"dim\":%u,\"clock\":\"%s\","
+                "\"led\":\"%s\",\"ledlvl\":%u}\n",
                 s.brightness, s.alert1, s.alert2, s.h24 ? "true" : "false",
-                s.rot, s.cycle, FX_NAMES[(int)s.fx], s.dim, CLOCK_NAMES[(int)s.clock]);
+                s.rot, s.cycle, FX_NAMES[(int)s.fx], s.dim, CLOCK_NAMES[(int)s.clock],
+                LED_NAMES[(int)s.led], s.ledLevel);
 }
 
 void protocolSendEvent(const char *name, int value) {
@@ -106,6 +109,12 @@ static void applyConfig(JsonObjectConst d) {
     for (int i = 0; i < CLOCK_STYLES; i++)
       if (!strcmp(clock, CLOCK_NAMES[i])) g_settings.clock = (ClockStyle)i;
   }
+  const char *led = d["led"];
+  if (led) {
+    for (int i = 0; i < LED_MODES; i++)
+      if (!strcmp(led, LED_NAMES[i])) g_settings.led = (LedMode)i;
+  }
+  if (d["ledlvl"].is<int>()) g_settings.ledLevel = constrain(d["ledlvl"].as<int>(), 0, 255);
 }
 
 static void handleLine(const char *line, Requests &req) {
@@ -133,6 +142,31 @@ static void handleLine(const char *line, Requests &req) {
   if (!strcmp(type, "screen")) {
     if (doc["step"].is<int>()) req.step = constrain(doc["step"].as<int>(), -1, 1);
     else req.screen = doc["n"] | 0;
+    return;
+  }
+  if (!strcmp(type, "weather")) {
+    WeatherData &w = g_weather;
+    if (doc["valid"].is<bool>() && !doc["valid"].as<bool>()) {
+      w = WeatherData();
+    } else {
+      const char *place = doc["place"] | "";
+      size_t i = 0;
+      for (; place[i] && i < sizeof w.place - 1; i++)
+        w.place[i] = (place[i] >= 32 && place[i] < 127) ? place[i] : '?';
+      w.place[i] = 0;
+      w.temp = doc["t"] | 0;
+      w.feels = doc["feels"] | w.temp;
+      w.hi = doc["hi"] | w.temp;
+      w.lo = doc["lo"] | w.temp;
+      w.hum = constrain(doc["hum"] | 0, 0, 100);
+      w.wind = constrain(doc["wind"] | 0, 0, 999);
+      w.rain = constrain(doc["rain"] | -1, -1, 100);
+      w.code = constrain(doc["code"] | 0, 0, 99);
+      w.day = (doc["day"] | 1) != 0;
+      w.at = doc["at"] | 0UL;
+      w.valid = true;
+    }
+    req.weather = true;
     return;
   }
   if (!strcmp(type, "apps")) {

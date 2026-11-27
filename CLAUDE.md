@@ -73,13 +73,18 @@ flags until the setting is changed on the page (`effective()` in `main.js`).
 
 ## Status
 
-- Display, screens, alerts, and the companion with `--limits` all work. The board is now on COM12
-  (CH340, 1a86:7523); COM3 is an unrelated CH9102 with the same vendor id, so auto-detect matches the PID.
-- Firmware 0.3.0: screens Main/Today/Clock/Calendar/Launcher (clock redraws every second while shown;
+- Display, screens, alerts, and the companion with `--limits` all work. The board's CH340 (1a86:7523) has
+  shown up as COM12 and COM13 depending on the USB port; COM3 is an unrelated CH9102 with the same vendor
+  id. Auto-detect (`autoPort` in `board.js`) takes only the CH340, never another chip.
+- Firmware 0.3.0: screens Main/Today/Clock/Weather/Calendar/Launcher (clock redraws every second while shown;
   six styles, `ClockStyle` in `model.h` / `CLOCK_NAMES` in `protocol.cpp` / `CLOCK_STYLES` in `config.js`;
   style is the `clock` board setting, big digits are TFT_eSPI font 8), each with a nav bar (prev/next/play-pause;
   tap targets come from `uiHitTest` in `ui.cpp`, actions in `handleTap` in `main.cpp`); settings saved in NVS (`src/settings.cpp`), rotation 0-3 (portrait/landscape, each flippable; landscape has its own Main/Today layouts in `ui.cpp`, touch remapped in `input.cpp`),
   auto screen cycle, wipe/fade transitions, configurable dim, `preview` frames.
+- Back RGB LED (`src/led.cpp`, PWM channels 1-3; the backlight is 0): usage colour, alert/back pulses,
+  blue pulse when offline; `led`/`ledlvl` board settings.
+- Weather: `companion/src/weather.js` fetches Open-Meteo every 15 min for `config.weather` (lat/lon from
+  the page's place search, `/api/geocode`) and sends a `weather` frame only when `weatherState.seq` moves.
 - Launcher: tiles live in the companion config (`apps`); the board gets names only (`apps` frame) and
   sends a `launch` event, which `launcher.js` opens (`.exe` spawned directly, anything else via the shell).
 - Companion 0.3.0 (`companion/src/`, CommonJS so pkg can bundle it): tray icon via a hidden PowerShell

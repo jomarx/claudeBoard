@@ -94,8 +94,9 @@ alert screen and the "you're back" screen without waiting for real usage.
 
 ## Controls
 
-Five screens: **Main** (gauges), **Today** (daily detail), **Clock** (digital, analog, rings, flip, words or binary, picked
-under "Clock style" on the settings page), **Calendar** (this month, today
+Six screens: **Main** (gauges), **Today** (daily detail), **Clock** (digital, analog, rings, flip, words or binary, picked
+under "Clock style" on the settings page), **Weather** (current conditions for a place you
+pick on the settings page), **Calendar** (this month, today
 circled) and **Apps** (a launcher). Each has a bar along the bottom: previous, next, the page
 dots, and play/pause for the automatic screen change.
 
@@ -105,6 +106,16 @@ dots, and play/pause for the automatic screen change.
 | Tap elsewhere | Main, Today: next screen. Calendar: month title left / middle / right = previous month / this month / next month. Apps: opens that tile on the PC | tap a button |
 | BOOT button | next screen | dismiss |
 | Long press (touch or BOOT) | cycle brightness | - |
+
+The RGB LED on the back is a status light ("Back LED" on the settings page): green, amber or red
+with the 5-hour usage like the gauge, a red pulse while a limit alert is up, a green pulse when
+the limit resets, a slow blue pulse when no data arrives from the PC, and a white blink when you
+tap a launcher tile. "Alerts only" keeps it dark except for the pulses; it dims with the screen.
+
+Weather comes from [Open-Meteo](https://open-meteo.com) (free, no account): search a place in the
+settings page's Weather section and pick it. The companion fetches it every 15 minutes and only
+sends that place's coordinates; the board never goes online. The condition turns amber when the
+reading is over 3 hours old.
 
 The launcher's tiles are set on the settings page (Launcher section, up to 8): a name for the
 board and what to open, which is a program (`.exe`, with optional arguments), or a file,

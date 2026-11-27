@@ -35,6 +35,9 @@ struct UsageData {
 enum class Fx : uint8_t { None = 0, Wipe = 1, Fade = 2 };
 enum class ClockStyle : uint8_t { Digital = 0, Analog = 1, Rings = 2, Flip = 3, Words = 4, Binary = 5 };
 #define CLOCK_STYLES 6
+// The RGB LED on the back: usage colour + alert pulses, alert pulses only, or dark.
+enum class LedMode : uint8_t { Off = 0, Usage = 1, Alerts = 2 };
+#define LED_MODES 3
 
 // Saved in NVS (settings.cpp); the companion can change every field with a cfg frame.
 struct Settings {
@@ -46,12 +49,14 @@ struct Settings {
   uint16_t cycle = 0;       // seconds between automatic page changes, 0 = off
   Fx fx = Fx::None;         // effect when the page changes
   ClockStyle clock = ClockStyle::Digital;   // the clock screen's face
+  LedMode led = LedMode::Usage;             // what the back LED shows (led.cpp)
+  uint8_t ledLevel = 60;                    // its brightness, 0-255
   uint16_t dim = 120;       // seconds idle before dimming, 0 = never
 
   bool operator==(const Settings &o) const {
     return brightness == o.brightness && alert1 == o.alert1 && alert2 == o.alert2 && h24 == o.h24 &&
            rot == o.rot && cycle == o.cycle && fx == o.fx && dim == o.dim &&
-           clock == o.clock;
+           clock == o.clock && led == o.led && ledLevel == o.ledLevel;
   }
   bool operator!=(const Settings &o) const { return !(*this == o); }
 };
@@ -81,3 +86,19 @@ struct AppEntry {
 
 extern AppEntry g_apps[MAX_APPS];
 extern uint8_t g_appCount;
+
+// Current weather, sent by the companion (it fetches Open-Meteo for the place set on its
+// settings page). Temperatures in degrees C, wind in km/h.
+struct WeatherData {
+  bool valid = false;
+  char place[24] = "";
+  int16_t temp = 0, feels = 0, hi = 0, lo = 0;
+  uint8_t hum = 0;              // relative humidity %
+  uint16_t wind = 0;
+  int8_t rain = -1;             // today's chance of rain %, -1 = unknown
+  uint8_t code = 0;             // WMO weather code
+  bool day = true;
+  uint32_t at = 0;              // unix seconds of the observation, 0 = unknown
+};
+
+extern WeatherData g_weather;

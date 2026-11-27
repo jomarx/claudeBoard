@@ -8,6 +8,7 @@
 #include "ui.h"
 #include "input.h"
 #include "settings.h"
+#include "led.h"
 
 UsageData g_usage;
 Settings g_settings;
@@ -16,6 +17,7 @@ uint32_t g_lastFrameMs = 0;
 AppEntry g_apps[MAX_APPS];
 uint8_t g_appCount = 0;
 UiState g_ui;
+WeatherData g_weather;
 static uint32_t pressedAppMs = 0;   // when a launcher tile was tapped, to un-highlight it
 
 static View page = View::Main;      // the pageable screen underneath any overlay
@@ -171,6 +173,7 @@ static void handleTap(int x, int y) {
       pressedAppMs = millis();
       dirty = true;
       protocolSendEvent("launch", h.index);
+      ledFlash(255, 255, 255, 120);
       break;
     default:
       // Off any button: the gauge screens keep "tap anywhere for the next page".
@@ -218,9 +221,9 @@ static void handleInput(const InputEvent &ev) {
 // ---------- main ----------
 
 void setup() {
-  // Board peripherals the meter doesn't use: RGB LED off (active low),
-  // speaker amplifier off (enable is active low).
-  for (int p : {22, 16, 17}) { pinMode(p, OUTPUT); digitalWrite(p, HIGH); }
+  // The RGB LED starts dark (led.cpp); the speaker amplifier isn't used, so keep it off
+  // (its enable is active low).
+  ledBegin();
   pinMode(4, OUTPUT);
   digitalWrite(4, HIGH);
 
@@ -287,6 +290,7 @@ void loop() {
     if (g_ui.pressedApp >= g_appCount) g_ui.pressedApp = -1;
     if (page == View::Launcher) dirty = true;
   }
+  if (req.weather && page == View::Weather) dirty = true;
   if (g_ui.pressedApp >= 0 && millis() - pressedAppMs > 400) {
     g_ui.pressedApp = -1;
     dirty = true;
@@ -306,6 +310,14 @@ void loop() {
   tickAlerts();
   tickCycle();
   tickDim();
+
+  LedInput led;
+  led.pct = g_usage.sessionPct;
+  led.alert = shown == View::Alert;
+  led.back = shown == View::Back;
+  led.dimmed = dimmed;
+  led.offline = !g_lastFrameMs || millis() - g_lastFrameMs > OFFLINE_AFTER_MS;
+  ledTick(led);
 
   static uint32_t lastSig = 0;
   uint32_t sig = timeSignature();

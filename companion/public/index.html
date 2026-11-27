@@ -105,7 +105,21 @@
     </div>
     <div class="row">
       <label for="brightness">Brightness</label>
-      <div class="inline"><input id="brightness" type="range" min="5" max="255" data-board="brightness"><span id="brightness-v"></span></div>
+      <div class="inline"><input id="brightness" type="range" min="5" max="255" data-board="brightness"><span class="range-v"></span></div>
+    </div>
+    <div class="row">
+      <label>Back LED</label>
+      <div class="seg" data-board="led">
+        <button type="button" data-v="usage">Usage colour</button>
+        <button type="button" data-v="alerts">Alerts only</button>
+        <button type="button" data-v="off">Off</button>
+      </div>
+      <div class="hint">Usage colour: green / amber / red like the gauge, a red pulse during an alert,
+        green when the limit resets, slow blue when there's no data from this PC.</div>
+    </div>
+    <div class="row">
+      <label for="ledlvl">LED brightness</label>
+      <div class="inline"><input id="ledlvl" type="range" min="0" max="255" data-board="ledlvl"><span class="range-v"></span></div>
     </div>
     <div class="row">
       <label for="dim">Dim when idle after</label>
@@ -157,6 +171,29 @@
         <button class="act" data-action="alert" type="button">Preview alert</button>
         <button class="act" data-action="back" type="button">Preview "you're back"</button>
       </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Weather</h2>
+    <p class="lead">For the board's Weather screen, from Open-Meteo (no account needed). Only the
+      place you pick is sent there; it updates every 15 minutes.</p>
+    <div class="row">
+      <label>Location</label>
+      <div class="inline">
+        <span id="w-place">-</span>
+        <button class="act" id="w-refresh" type="button">Update now</button>
+        <button class="act" id="w-clear" type="button">Clear</button>
+      </div>
+      <div class="hint" id="w-status"></div>
+    </div>
+    <div class="row">
+      <label for="w-q">Find a place</label>
+      <div class="inline">
+        <input type="text" id="w-q" maxlength="80" placeholder="City or town, e.g. Makati">
+        <button class="act" id="w-search" type="button">Search</button>
+      </div>
+      <div class="hint" id="w-results"></div>
     </div>
   </section>
 
@@ -290,7 +327,9 @@ function render(s) {
     }
   }
   renderApps(c.apps);
-  $('brightness-v').textContent = $('brightness').value;
+  renderWeather(c.weather, s.weather);
+  // Each slider shows its value in the span right after it.
+  for (const r of document.querySelectorAll('input[type=range]')) r.nextElementSibling.textContent = r.value;
   $('startup').checked = s.startup;
   if (!$('port').matches(':focus')) $('port').value = c.port;
   $('files').textContent = `Settings: ${s.files.config} · Log: ${s.files.log}`;
@@ -298,6 +337,48 @@ function render(s) {
   log.textContent = s.log.join('\n');
   if (atBottom) log.scrollTop = log.scrollHeight;
 }
+
+// ---------- weather ----------
+
+function renderWeather(loc, w) {
+  $('w-place').textContent = loc.lat === null ? 'not set' : `${loc.name || 'Unnamed'} (${loc.lat}, ${loc.lon})`;
+  $('w-refresh').disabled = $('w-clear').disabled = loc.lat === null;
+  let st = '';
+  if (w.error) st = 'Last try failed: ' + w.error;
+  else if (w.data) st = `${w.data.t}°C, humidity ${w.data.hum}%, wind ${w.data.wind} km/h · fetched ${ago(w.at)}`;
+  else if (loc.lat !== null) st = 'Fetching...';
+  $('w-status').textContent = st;
+}
+
+async function searchPlace() {
+  const q = $('w-q').value.trim();
+  const box = $('w-results');
+  if (q.length < 2) { box.textContent = 'Type at least 2 letters.'; return; }
+  box.textContent = 'Searching...';
+  try {
+    const list = await api('/api/geocode', { q });
+    box.replaceChildren();
+    if (!list.length) { box.textContent = 'No places found.'; return; }
+    for (const p of list) {
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'act'; b.style.margin = '4px 6px 0 0';
+      b.textContent = p.label;
+      b.addEventListener('click', async () => {
+        box.textContent = '';
+        $('w-q').value = '';
+        await save({ weather: { name: p.name, lat: p.lat, lon: p.lon } });
+      });
+      box.append(b);
+    }
+  } catch (e) { box.textContent = 'Search failed: ' + e.message; }
+}
+
+$('w-search').addEventListener('click', searchPlace);
+$('w-q').addEventListener('keydown', (e) => { if (e.key === 'Enter') searchPlace(); });
+$('w-clear').addEventListener('click', () => save({ weather: { lat: null } }));
+$('w-refresh').addEventListener('click', async () => {
+  try { render(await api('/api/action', { action: 'weather' })); } catch (e) { alertBox(e.message); }
+});
 
 // ---------- launcher apps ----------
 
@@ -420,7 +501,7 @@ for (const el of document.querySelectorAll('[data-key],[data-board]')) {
   if (el.type === 'range') {
     let t;
     el.addEventListener('input', () => {
-      $('brightness-v').textContent = el.value;
+      el.nextElementSibling.textContent = el.value;
       clearTimeout(t);
       t = setTimeout(() => save(patch(valueOf(el))), 120);   // live on the board while dragging
     });

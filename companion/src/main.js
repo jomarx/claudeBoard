@@ -10,6 +10,7 @@ const { Tray } = require('./tray');
 const { createServer } = require('./server');
 const startup = require('./startup');
 const { launch, frontNames } = require('./launcher');
+const { refreshWeather, weatherFrame, weatherState, geocode } = require('./weather');
 const VERSION = require('../package.json').version;
 
 // ---------- command line ----------
@@ -102,10 +103,19 @@ async function run() {
     list: effective().apps.map((a) => a.name.replace(/[^\x20-\x7e]/g, '?')),
   });
 
+  // Weather goes out only when there is something new (weatherState.seq moved) or the
+  // board came back; -1 forces the next push to send it.
+  let weatherSent = -1;
+  const sendWeather = (cfg) => {
+    if (weatherState.seq === weatherSent) return;
+    if (board.send(weatherFrame(cfg))) weatherSent = weatherState.seq;
+  };
+
   const push = async () => {
     const cfg = effective();
-    await refreshLimits(cfg);
+    await Promise.all([refreshLimits(cfg), refreshWeather(cfg)]);
     if (!board.state.ready) return;
+    sendWeather(cfg);
     const f = buildFrame(cfg);
     if (board.send(f)) {
       lastFrame = f;
@@ -127,6 +137,7 @@ async function run() {
   board.on('ready', () => {
     sendBoardCfg();
     sendApps();
+    weatherSent = -1;   // a (re)booted board has no weather
     push();
     schedule();
   });
@@ -176,6 +187,7 @@ async function run() {
         overridden: [...Object.keys(overrides), ...Object.keys(ovBoard).map((k) => 'board.' + k)],
         board: board.state,
         limits: { enabled: cfg.limits, ok: !!limitsState.data && !limitsState.error, error: limitsState.error, at: limitsState.at },
+        weather: { set: cfg.weather.lat !== null, data: weatherState.data, error: weatherState.error, at: weatherState.at },
         lastFrame: lastFrame && {
           at: lastFrameAt, plan: lastFrame.plan, tokens: lastFrame.today.tokens, cost: lastFrame.today.cost,
           session: lastFrame.session.pct, week: lastFrame.week.pct,
@@ -186,6 +198,7 @@ async function run() {
       };
     },
     ports: () => listPorts(),
+    geocode: (q) => geocode(q),
     async updateConfig(body) {
       const before = effective();
       // Anything set on the page stops being overridden by the command line.
@@ -198,6 +211,10 @@ async function run() {
       if (after.port !== before.port) { log(`port set to ${after.port}`); board.reconnect(); }
       if (!sameJSON(after.board, before.board)) sendBoardCfg();
       if (!sameJSON(after.apps, before.apps)) sendApps();
+      if (!sameJSON(after.weather, before.weather)) {
+        await refreshWeather(after, true);
+        sendWeather(after);
+      }
       if (after.interval !== before.interval) schedule();
       if (after.limits !== before.limits) await refreshLimits(after, true);
       if (after.limits !== before.limits || after.plan !== before.plan || after.sessionBudget !== before.sessionBudget) push();
@@ -226,6 +243,7 @@ async function run() {
         case 'alert': board.send({ type: 'preview', view: 'alert' }); break;
         case 'back': board.send({ type: 'preview', view: 'back' }); break;
         case 'reconnect': board.reconnect(); break;
+        case 'weather': await refreshWeather(effective(), true); sendWeather(effective()); break;
         case 'push': await refreshLimits(effective(), true); await push(); break;
         default: throw new Error('unknown action');
       }

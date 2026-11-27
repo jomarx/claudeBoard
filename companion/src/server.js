@@ -57,6 +57,7 @@ function createServer(app, port) {
         const body = await readBody(req);
         if (url.pathname === '/api/config') return json(res, 200, await app.updateConfig(body));
         if (url.pathname === '/api/action') return json(res, 200, await app.action(String(body.action || ''), body));
+        if (url.pathname === '/api/geocode') return json(res, 200, await app.geocode(body.q));
       }
       json(res, 404, { error: 'not found' });
     } catch (e) {

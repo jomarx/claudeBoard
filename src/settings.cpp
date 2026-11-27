@@ -20,6 +20,9 @@ void settingsLoad() {
     s.fx = fx <= 2 ? (Fx)fx : Fx::None;
     uint8_t clock = prefs.getUChar("clock", 0);
     s.clock = clock < CLOCK_STYLES ? (ClockStyle)clock : ClockStyle::Digital;
+    uint8_t led = prefs.getUChar("led", (uint8_t)s.led);
+    s.led = led < LED_MODES ? (LedMode)led : LedMode::Usage;
+    s.ledLevel = prefs.getUChar("ledlvl", s.ledLevel);
     s.dim = prefs.getUShort("dim", s.dim);
     g_settings = s;
   }
@@ -40,6 +43,8 @@ void settingsSave() {
   prefs.putUShort("cycle", s.cycle);
   prefs.putUChar("fx", (uint8_t)s.fx);
   prefs.putUChar("clock", (uint8_t)s.clock);
+  prefs.putUChar("led", (uint8_t)s.led);
+  prefs.putUChar("ledlvl", s.ledLevel);
   prefs.putUShort("dim", s.dim);
   prefs.end();
   saved = s;
