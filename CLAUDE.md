@@ -95,7 +95,8 @@ flags until the setting is changed on the page (`effective()` in `main.js`).
   helper then raises the app's window (`front|...`), since Windows won't let a background process do it.
 - Companion (CommonJS so pkg can bundle it): tray icon via a hidden PowerShell NotifyIcon helper, settings page
   on 127.0.0.1:47820 (Host check + JSON-only POST), config in `%APPDATA%\claudeBoard`, single instance via the
-  UI port. It detects firmware without the 0.3+ screens from hello (`screens`) and says so on the page.
+  UI port. It spots firmware without the 0.3+ screens by the `apps` flag in hello (kept as `screens`
+  in `board.js` state) and says so on the page.
 - The board's CH340 (1a86:7523) has shown up as COM12 and COM13 depending on the USB port; COM3 is an
   unrelated CH9102 with the same vendor id. Auto-detect (`autoPort` in `board.js`) takes only the CH340.
 - `--limits` reads the `claude` CLI sign-in from `~/.claude/.credentials.json` and calls the undocumented
