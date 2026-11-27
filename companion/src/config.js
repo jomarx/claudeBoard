@@ -17,6 +17,11 @@ const DEFAULTS = {
   plan: '',               // label on the meter; empty = from the sign-in
   apps: [],               // launcher tiles: { name, path, args }, at most MAX_APPS
   weather: { name: '', lat: null, lon: null },   // weather screen location; lat null = none
+  // Wi-Fi sync: the LAN listener boards connect to (lan.js), and the pairing token they
+  // must send. The token is made on first run (main.js).
+  lan: { port: 47821, token: '' },
+  // The last Wi-Fi setup sent to a board, to pre-fill the form. Never the password.
+  wifi: { ssid: '', ip: '', gw: '', mask: '255.255.255.0', dns: '', host: '' },
   startup: false,         // start with Windows (mirrors the registry Run value)
   board: {
     brightness: 200,      // 5-255
@@ -30,6 +35,7 @@ const DEFAULTS = {
     clock: 'digital',     // clock screen face, one of CLOCK_STYLES
     led: 'usage',         // back LED: 'off' | 'usage' | 'alerts' (LED_NAMES in src/protocol.cpp)
     ledlvl: 60,           // back LED brightness, 0-255
+    sync: 'usb',          // where the board gets data: 'usb' | 'wifi' (SYNC_NAMES in src/protocol.cpp)
   },
 };
 
@@ -39,7 +45,7 @@ const clampInt = (v, lo, hi, def) => {
 };
 
 const MAX_APPS = 8;   // the board's launcher grid (MAX_APPS in src/model.h)
-const CLOCK_STYLES = ['digital', 'analog', 'rings', 'flip', 'words', 'binary'];   // CLOCK_NAMES in src/protocol.cpp
+const CLOCK_STYLES = ['digital', 'analog', 'rings', 'flip', 'words', 'binary', 'dots'];   // CLOCK_NAMES in src/protocol.cpp
 
 // One launcher tile, or null if it has no name or nothing to open. The name is what the
 // board shows (15 chars, its fonts are ASCII); path is a program, file, folder or URL.
@@ -53,6 +59,29 @@ function normalizeApp(a) {
 }
 
 // The weather location: a label plus coordinates, or no location at all.
+const IPV4 = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
+const ipOr = (v, def) => (typeof v === 'string' && IPV4.test(v.trim()) ? v.trim() : def);
+
+function normalizeLan(l, base) {
+  const i = l && typeof l === 'object' ? l : {};
+  return {
+    port: clampInt(i.port, 1024, 65535, base.port),
+    token: typeof i.token === 'string' && /^[0-9a-f]{32}$/.test(i.token) ? i.token : base.token,
+  };
+}
+
+function normalizeWifi(w, base) {
+  const i = w && typeof w === 'object' ? w : {};
+  return {
+    ssid: typeof i.ssid === 'string' ? i.ssid.slice(0, 32) : base.ssid,
+    ip: ipOr(i.ip, base.ip),
+    gw: ipOr(i.gw, base.gw),
+    mask: ipOr(i.mask, base.mask),
+    dns: ipOr(i.dns, base.dns),
+    host: typeof i.host === 'string' && /^[A-Za-z0-9.-]{0,63}$/.test(i.host.trim()) ? i.host.trim() : base.host,
+  };
+}
+
 function normalizeWeather(w, base) {
   if (!w || typeof w !== 'object') return base;
   const lat = Number(w.lat), lon = Number(w.lon);
@@ -80,6 +109,8 @@ function normalize(input, base = DEFAULTS) {
     plan: typeof i.plan === 'string' ? i.plan.slice(0, 15) : base.plan,
     apps: Array.isArray(i.apps) ? i.apps.map(normalizeApp).filter(Boolean).slice(0, MAX_APPS) : base.apps,
     weather: normalizeWeather(i.weather, base.weather),
+    lan: normalizeLan(i.lan, base.lan),
+    wifi: normalizeWifi(i.wifi, base.wifi),
     startup: typeof i.startup === 'boolean' ? i.startup : base.startup,
     board: {
       brightness: clampInt(b.brightness, 5, 255, bb.brightness),
@@ -93,6 +124,7 @@ function normalize(input, base = DEFAULTS) {
       clock: CLOCK_STYLES.includes(b.clock) ? b.clock : bb.clock,
       led: ['off', 'usage', 'alerts'].includes(b.led) ? b.led : bb.led,
       ledlvl: clampInt(b.ledlvl, 0, 255, bb.ledlvl),
+      sync: ['usb', 'wifi'].includes(b.sync) ? b.sync : bb.sync,
     },
   };
 }
@@ -112,4 +144,4 @@ function save(cfg) {
   fs.renameSync(tmp, FILE);
 }
 
-module.exports = { APP_DIR, FILE, DEFAULTS, MAX_APPS, normalize, load, save };
+module.exports = { APP_DIR, FILE, DEFAULTS, MAX_APPS, IPV4, normalize, load, save };

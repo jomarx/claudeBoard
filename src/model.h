@@ -1,7 +1,7 @@
 #pragma once
 #include <Arduino.h>
 
-#define FW_VERSION "0.4.0"
+#define FW_VERSION "0.5.0"
 
 // How long without a usage frame before the status dot changes.
 #define STALE_AFTER_MS   (120UL * 1000UL)
@@ -33,11 +33,13 @@ struct UsageData {
 };
 
 enum class Fx : uint8_t { None = 0, Wipe = 1, Fade = 2 };
-enum class ClockStyle : uint8_t { Digital = 0, Analog = 1, Rings = 2, Flip = 3, Words = 4, Binary = 5 };
-#define CLOCK_STYLES 6
+enum class ClockStyle : uint8_t { Digital = 0, Analog = 1, Rings = 2, Flip = 3, Words = 4, Binary = 5, Dots = 6 };
+#define CLOCK_STYLES 7
 // The RGB LED on the back: usage colour + alert pulses, alert pulses only, or dark.
 enum class LedMode : uint8_t { Off = 0, Usage = 1, Alerts = 2 };
 #define LED_MODES 3
+// Where the board gets its data: the USB cable or Wi-Fi (net.cpp), one at a time.
+enum class SyncMode : uint8_t { Usb = 0, Wifi = 1 };
 
 // Saved in NVS (settings.cpp); the companion can change every field with a cfg frame.
 struct Settings {
@@ -51,12 +53,13 @@ struct Settings {
   ClockStyle clock = ClockStyle::Digital;   // the clock screen's face
   LedMode led = LedMode::Usage;             // what the back LED shows (led.cpp)
   uint8_t ledLevel = 60;                    // its brightness, 0-255
+  SyncMode sync = SyncMode::Usb;            // data over USB or Wi-Fi
   uint16_t dim = 120;       // seconds idle before dimming, 0 = never
 
   bool operator==(const Settings &o) const {
     return brightness == o.brightness && alert1 == o.alert1 && alert2 == o.alert2 && h24 == o.h24 &&
            rot == o.rot && cycle == o.cycle && fx == o.fx && dim == o.dim &&
-           clock == o.clock && led == o.led && ledLevel == o.ledLevel;
+           clock == o.clock && led == o.led && ledLevel == o.ledLevel && sync == o.sync;
   }
   bool operator!=(const Settings &o) const { return !(*this == o); }
 };

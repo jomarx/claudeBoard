@@ -112,6 +112,22 @@ The Media screen shows what Windows' own media flyout shows (Spotify, a browser 
 and its buttons press the PC's media keys, so they control whatever is playing; no setup.
 It needs the tray helper, so not with `--no-tray`.
 
+### Wi-Fi instead of the cable
+
+The board can get its data over Wi-Fi instead of USB (one or the other, never both). On the
+settings page, **Sync** section: with the board plugged in, enter the Wi-Fi network and password,
+a fixed IP for the board (outside the router's DHCP range), the gateway and mask, and this PC's
+fixed IP as the server, then press *Send to the board over USB and switch to Wi-Fi*. The board then
+connects to the companion on port 47821 by itself, with a pairing token it was given over USB;
+the cable can be swapped for any USB charger. Windows may ask to allow the companion on the network:
+allow private networks. Switch back to USB on the same page. The password goes only to the board.
+
+No PC at hand: hold the board's BOOT button for 5 seconds (or press *Open Wi-Fi setup on the board*).
+The board opens its own Wi-Fi network and shows its name and an 8-digit password; join it from a
+phone and the setup page opens (or go to 192.168.4.1). Fill in the same fields plus the pairing token
+from the Sync section, and save: the board restarts on Wi-Fi. Cancel on the board closes it, nothing
+changed. The Network page (the last screen) shows the board's Wi-Fi, IP, signal and server state.
+
 The RGB LED on the back is a status light ("Back LED" on the settings page): green, amber or red
 with the 5-hour usage like the gauge, a red pulse while a limit alert is up, a green pulse when
 the limit resets, a slow blue pulse when no data arrives from the PC, and a white blink when you

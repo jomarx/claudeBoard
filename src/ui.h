@@ -10,9 +10,11 @@ enum class View : uint8_t {
   Media = 4,     // now playing on the PC, transport and volume buttons
   Calendar = 5,  // month grid
   Launcher = 6,  // app tiles that open things on the PC
-  PageCount = 7, // number of pageable screens
+  Network = 7,   // Sync, Wi-Fi, board IP, server, signal
+  PageCount = 8, // number of pageable screens
   Alert,         // limit alert overlay
   Back,          // "limit has reset" overlay
+  Setup,         // Wi-Fi setup network is open (portal.cpp)
 };
 
 struct AlertInfo {
@@ -45,6 +47,7 @@ enum class Hit : uint8_t {
   App,                                // launcher tile, index in HitResult
   Media,                              // media button, MediaKey in HitResult.index
   Snooze, Dismiss,                    // alert buttons
+  SetupCancel,                        // Cancel on the Wi-Fi setup screen
 };
 
 // The media screen's buttons; the value goes to the PC in the "media" event.

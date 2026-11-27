@@ -9,6 +9,8 @@
 #include "input.h"
 #include "settings.h"
 #include "led.h"
+#include "net.h"
+#include "portal.h"
 
 UsageData g_usage;
 Settings g_settings;
@@ -111,7 +113,7 @@ static void wake() {
 }
 
 static void tickDim() {
-  if (shown == View::Alert || shown == View::Back) return;  // never dim an alert
+  if (shown == View::Alert || shown == View::Back || shown == View::Setup) return;  // never dim these
   if (g_settings.dim == 0) return;
   if (!dimmed && millis() - lastActivityMs > g_settings.dim * 1000UL) {
     dimmed = true;
@@ -195,13 +197,41 @@ static void handleTap(int x, int y) {
   }
 }
 
+// ---------- Wi-Fi setup on the board (portal.cpp) ----------
+
+// Both tell a companion on USB right away (an unasked net report), so its page never shows
+// a setup network that is already gone, whatever closed it: Cancel, BOOT, or the page.
+static void openSetup() {
+  portalStart();
+  wake();
+  show(View::Setup);
+  protocolSendNet(Serial);
+}
+
+static void closeSetup() {
+  portalStop();
+  if (shown == View::Setup) showPage();
+  protocolSendNet(Serial);
+}
+
 static void handleInput(const InputEvent &ev) {
   if (ev.kind == InputKind::None) return;
+  // BOOT held 5 s: Wi-Fi setup, from any screen, dimmed or not (a deliberate 5 s hold is
+  // never just a wake-up). Nothing is erased; Cancel just closes it.
+  if (ev.kind == InputKind::ButtonHold) {
+    openSetup();
+    return;
+  }
   bool wasDim = dimmed;
   wake();
   if (wasDim) return;  // the first touch only wakes the screen
 
   switch (shown) {
+    case View::Setup:
+      if ((ev.kind == InputKind::Tap && uiHitTest(View::Setup, ev.x, ev.y).kind == Hit::SetupCancel) ||
+          ev.kind == InputKind::ButtonShort)
+        closeSetup();
+      return;
     case View::Alert:
       if (ev.kind == InputKind::Tap) {
         Hit b = uiHitTest(View::Alert, ev.x, ev.y).kind;
@@ -249,8 +279,14 @@ void setup() {
   uiRender(shown, alert);
   dirty = false;
   pageChanged = false;
-  protocolSendHello();
-  protocolSendSettings();
+  protocolSendHello(Serial, false);
+  protocolSendSettings(Serial);
+  // Wi-Fi last: the screen's 76.8 KB band buffer is already allocated (uiBegin), before the
+  // Wi-Fi stack breaks up the heap.
+  netBegin();
+  // Wi-Fi chosen but nothing to join: open setup right away so the board can be set up
+  // from a phone.
+  if (g_settings.sync == SyncMode::Wifi && !netSettings().configured()) openSetup();
 }
 
 // Things on screen that change with time alone: the minute (the second on the clock
@@ -261,6 +297,11 @@ static uint32_t timeSignature() {
     uint32_t age = millis() - g_lastFrameMs;
     sig = sig * 4 + (age < STALE_AFTER_MS ? 1 : age < OFFLINE_AFTER_MS ? 2 : 3);
   }
+  // The Wi-Fi state shows in the header mark, the waiting screen and the Network page.
+  if (g_settings.sync == SyncMode::Wifi)
+    sig = sig * 4 + (netServerConnected() ? 3 : !strcmp(netWifiState(), "connected") ? 2 : 1);
+  // The setup screen says when a phone has joined.
+  if (shown == View::Setup) sig = sig * 8 + min(portalClients(), 7);
   return sig;
 }
 
@@ -279,11 +320,22 @@ static void applySettings(const Settings &before) {
     lastPageMs = millis();
   }
   settingsSave();
+  if (s.sync != before.sync) netApply();   // radio on for Wi-Fi, off for USB
 }
 
 void loop() {
   Requests req;
   protocolPoll(req);
+  netLoop(req);
+  portalLoop();
+  if (req.setup == 1) openSetup();
+  else if (req.setup == 0) closeSetup();
+  // Setup stays on screen while it's open; an alert may cover it and comes back to it.
+  if (portalActive() && shown == page) show(View::Setup);
+  if (req.net) {
+    netApply();   // new Wi-Fi settings: reconnect with them (only does anything in Wi-Fi mode)
+    dirty = true;
+  }
   if (req.config) {
     applySettings(req.before);
     dirty = true;

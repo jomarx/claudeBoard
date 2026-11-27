@@ -33,24 +33,91 @@ async function autoPort() {
   return board ? board.path : null;
 }
 
-class Board extends EventEmitter {
-  constructor(getCfg, { verbose = false } = {}) {
+// What any link to a board shares, USB or Wi-Fi (netboard.js): its state, and reading the
+// board's messages. Emits 'ready' (send it config + data), 'cfg', 'event', 'net', 'status'.
+class BoardLink extends EventEmitter {
+  constructor({ verbose = false, label = 'board' } = {}) {
     super();
-    this.getCfg = getCfg;
     this.verbose = verbose;
-    this.port = null;
-    this.retry = null;
+    this.label = label;
     this.bootTimer = null;
-    this.stopped = false;
     this.state = {
       path: null, connected: false, ready: false, fw: null, cfgCapable: false, screens: false,
-      boardCfg: null, lastAckAt: 0, error: '',
+      netCapable: false, net: null, boardCfg: null, lastAckAt: 0, error: '',
     };
   }
 
   status(patch) {
     Object.assign(this.state, patch);
     this.emit('status', this.state);
+  }
+
+  markReady() {
+    clearTimeout(this.bootTimer);
+    if (this.state.ready || !this.state.connected) return;
+    this.status({ ready: true });
+    this.emit('ready');
+  }
+
+  onLine(line) {
+    let m;
+    try { m = JSON.parse(line); } catch { return; }
+    if (this.verbose && m.type !== 'touch') log(`${this.label}:`, line);
+    switch (m.type) {
+      case 'hello': {
+        log(`${this.label} firmware ${m.fw}`);
+        const wasReady = this.state.ready;
+        const isReply = Date.now() - (this.helloAskedAt || 0) < 4000;
+        // "apps" in hello = firmware 0.3+ (screens, relative steps, launcher, rotation 0-3);
+        // "net" = 0.5+ (Wi-Fi sync, the wifi and net messages).
+        // net: null drops any earlier net report: after a restart (e.g. a save on the setup
+        // page) it no longer describes the board.
+        this.status({ fw: m.fw, cfgCapable: !!m.cfg, screens: !!m.apps, netCapable: !!m.net, net: null });
+        // Sync was chosen on the board's own setup page: let main adopt it before 'ready'
+        // sends our settings back, or they would undo it.
+        if (m.syncFromBoard === 'wifi' || m.syncFromBoard === 'usb') this.emit('syncFromBoard', m.syncFromBoard);
+        // An unasked hello after we started means it rebooted and lost its data.
+        if (!wasReady) this.markReady();
+        else if (!isReply) this.emit('ready');
+        break;
+      }
+      case 'cfg': {
+        const { type, ...rest } = m;
+        this.status({ boardCfg: rest, cfgCapable: true });
+        this.emit('cfg', rest);
+        break;
+      }
+      case 'net': {
+        const { type, ...rest } = m;
+        this.status({ net: rest });
+        this.emit('net', rest);
+        break;
+      }
+      case 'ack':
+        if (m.seq !== undefined) this.status({ lastAckAt: Date.now() });
+        break;
+      case 'event':
+        log(`${this.label}: ${m.name} ${m.value}`);
+        this.emit('event', m);
+        break;
+      case 'err':
+        log(`${this.label} error: ${m.msg}`);
+        this.emit('boardError', m.msg);
+        break;
+      default:
+        break;
+    }
+  }
+}
+
+// The board on the USB serial port.
+class Board extends BoardLink {
+  constructor(getCfg, { verbose = false } = {}) {
+    super({ verbose, label: 'board' });
+    this.getCfg = getCfg;
+    this.port = null;
+    this.retry = null;
+    this.stopped = false;
   }
 
   start() {
@@ -120,7 +187,7 @@ class Board extends EventEmitter {
         this.helloAskedAt = Date.now();
         this.send({ type: 'hello' });
       });
-      this.status({ path: p, connected: true, ready: false, fw: null, cfgCapable: false, screens: false, boardCfg: null, error: '' });
+      this.status({ path: p, connected: true, ready: false, fw: null, cfgCapable: false, screens: false, netCapable: false, net: null, boardCfg: null, error: '' });
       // Opening the port resets the board; give it time to boot, then start anyway.
       this.bootTimer = setTimeout(() => this.markReady(), 3000);
     });
@@ -146,50 +213,6 @@ class Board extends EventEmitter {
     });
     port.on('error', (e) => log('serial error:', e.message));
   }
-
-  markReady() {
-    clearTimeout(this.bootTimer);
-    if (this.state.ready || !this.state.connected) return;
-    this.status({ ready: true });
-    this.emit('ready');
-  }
-
-  onLine(line) {
-    let m;
-    try { m = JSON.parse(line); } catch { return; }
-    if (this.verbose && m.type !== 'touch') log('board:', line);
-    switch (m.type) {
-      case 'hello': {
-        log(`board firmware ${m.fw}`);
-        const wasReady = this.state.ready;
-        const isReply = Date.now() - (this.helloAskedAt || 0) < 4000;
-        // "apps" in hello = firmware 0.3+: five screens, relative steps, launcher, rotation 0-3.
-        this.status({ fw: m.fw, cfgCapable: !!m.cfg, screens: !!m.apps });
-        // An unasked hello after we started means it rebooted and lost its data.
-        if (!wasReady) this.markReady();
-        else if (!isReply) this.emit('ready');
-        break;
-      }
-      case 'cfg': {
-        const { type, ...rest } = m;
-        this.status({ boardCfg: rest, cfgCapable: true });
-        this.emit('cfg', rest);
-        break;
-      }
-      case 'ack':
-        if (m.seq !== undefined) this.status({ lastAckAt: Date.now() });
-        break;
-      case 'event':
-        log(`board: ${m.name} ${m.value}`);
-        this.emit('event', m);
-        break;
-      case 'err':
-        log(`board error: ${m.msg}`);
-        break;
-      default:
-        break;
-    }
-  }
 }
 
-module.exports = { Board, listPorts, autoPort };
+module.exports = { Board, BoardLink, listPorts, autoPort };

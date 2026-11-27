@@ -23,6 +23,7 @@ void settingsLoad() {
     uint8_t led = prefs.getUChar("led", (uint8_t)s.led);
     s.led = led < LED_MODES ? (LedMode)led : LedMode::Usage;
     s.ledLevel = prefs.getUChar("ledlvl", s.ledLevel);
+    s.sync = prefs.getUChar("sync", 0) == 1 ? SyncMode::Wifi : SyncMode::Usb;
     s.dim = prefs.getUShort("dim", s.dim);
     g_settings = s;
   }
@@ -45,6 +46,7 @@ void settingsSave() {
   prefs.putUChar("clock", (uint8_t)s.clock);
   prefs.putUChar("led", (uint8_t)s.led);
   prefs.putUChar("ledlvl", s.ledLevel);
+  prefs.putUChar("sync", (uint8_t)s.sync);
   prefs.putUShort("dim", s.dim);
   prefs.end();
   saved = s;

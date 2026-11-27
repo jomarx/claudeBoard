@@ -1,5 +1,7 @@
 #include "protocol.h"
 #include "model.h"
+#include "net.h"
+#include "portal.h"
 #include <ArduinoJson.h>
 
 static char lineBuf[2048];
@@ -11,8 +13,20 @@ void protocolBegin() {
   Serial.begin(115200);
 }
 
-void protocolSendHello() {
-  Serial.printf("{\"type\":\"hello\",\"fw\":\"%s\",\"w\":240,\"h\":320,\"cfg\":true,\"apps\":true}\n", FW_VERSION);
+// Where events go: the link the Sync setting picks. Wi-Fi without a server link falls back
+// to USB, so a tap still shows up on a serial monitor.
+Print &protocolEventOut() {
+  if (g_settings.sync == SyncMode::Wifi && netServerConnected()) return netOut();
+  return Serial;
+}
+
+void protocolSendHello(Print &out, bool overWifi) {
+  // syncFromBoard: Sync was set on the board itself (setup page); a companion adopts it
+  // rather than sending its own back. Cleared by the next cfg that carries sync.
+  out.printf("{\"type\":\"hello\",\"fw\":\"%s\",\"w\":240,\"h\":320,\"cfg\":true,\"apps\":true,"
+             "\"net\":true,\"link\":\"%s\"%s}\n",
+             FW_VERSION, overWifi ? "wifi" : "usb",
+             netBoardChoseSync() ? ",\"syncFromBoard\":\"wifi\"" : "");
 }
 
 // Copies text for the screen: the board fonts are ASCII only, so anything else shows as '?'.
@@ -23,29 +37,88 @@ static void copyAscii(char *dst, size_t n, const char *src) {
 }
 
 static const char *FX_NAMES[] = {"none", "wipe", "fade"};
-static const char *CLOCK_NAMES[CLOCK_STYLES] = {"digital", "analog", "rings", "flip", "words", "binary"};
+static const char *CLOCK_NAMES[CLOCK_STYLES] = {"digital", "analog", "rings", "flip", "words", "binary", "dots"};
 static const char *LED_NAMES[LED_MODES] = {"off", "usage", "alerts"};
+static const char *SYNC_NAMES[2] = {"usb", "wifi"};
 
-void protocolSendSettings() {
+void protocolSendSettings(Print &out) {
   const Settings &s = g_settings;
-  Serial.printf("{\"type\":\"cfg\",\"brightness\":%u,\"alert1\":%u,\"alert2\":%u,\"h24\":%s,"
-                "\"rot\":%u,\"cycle\":%u,\"fx\":\"%s\",\"dim\":%u,\"clock\":\"%s\","
-                "\"led\":\"%s\",\"ledlvl\":%u}\n",
-                s.brightness, s.alert1, s.alert2, s.h24 ? "true" : "false",
-                s.rot, s.cycle, FX_NAMES[(int)s.fx], s.dim, CLOCK_NAMES[(int)s.clock],
-                LED_NAMES[(int)s.led], s.ledLevel);
+  out.printf("{\"type\":\"cfg\",\"brightness\":%u,\"alert1\":%u,\"alert2\":%u,\"h24\":%s,"
+             "\"rot\":%u,\"cycle\":%u,\"fx\":\"%s\",\"dim\":%u,\"clock\":\"%s\","
+             "\"led\":\"%s\",\"ledlvl\":%u,\"sync\":\"%s\"}\n",
+             s.brightness, s.alert1, s.alert2, s.h24 ? "true" : "false",
+             s.rot, s.cycle, FX_NAMES[(int)s.fx], s.dim, CLOCK_NAMES[(int)s.clock],
+             LED_NAMES[(int)s.led], s.ledLevel, SYNC_NAMES[(int)s.sync]);
 }
 
 void protocolSendEvent(const char *name, int value) {
-  Serial.printf("{\"type\":\"event\",\"name\":\"%s\",\"value\":%d}\n", name, value);
+  protocolEventOut().printf("{\"type\":\"event\",\"name\":\"%s\",\"value\":%d}\n", name, value);
 }
 
-static void sendErr(const char *msg) {
+static void sendErr(Print &out, const char *msg) {
   JsonDocument d;
   d["type"] = "err";
   d["msg"] = msg;
-  serializeJson(d, Serial);
-  Serial.println();
+  serializeJson(d, out);
+  out.print('\n');
+}
+
+// The board's network state. The password and the token never leave the board.
+void protocolSendNet(Print &out) {
+  const NetSettings &n = netSettings();
+  JsonDocument d;
+  d["type"] = "net";
+  d["sync"] = SYNC_NAMES[(int)g_settings.sync];
+  d["configured"] = n.configured();
+  d["ssid"] = n.ssid;
+  d["ip"] = IPAddress(n.ip).toString();
+  d["gw"] = IPAddress(n.gw).toString();
+  d["mask"] = IPAddress(n.mask).toString();
+  d["dns"] = IPAddress(n.dns).toString();
+  d["host"] = n.host;
+  d["port"] = n.port;
+  d["wifi"] = netWifiState();
+  d["server"] = netServerConnected() ? "connected" : "not connected";
+  d["rssi"] = netRssi();
+  // Memory is the main risk of running Wi-Fi beside the 76.8 KB screen buffer: watch it.
+  d["setup"] = portalActive();
+  if (portalActive()) d["setupSsid"] = portalSsid();   // not its password: that stays on the screen
+  d["heap"] = ESP.getFreeHeap();
+  d["largest"] = ESP.getMaxAllocHeap();
+  serializeJson(d, out);
+  out.print('\n');
+}
+
+// {"type":"wifi",...} from the companion: the network, the board's fixed address, the
+// server and the token. Only over USB, so nobody on the network can move a board elsewhere.
+// True when the settings were stored (then Wi-Fi restarts with them).
+static bool applyWifi(Print &out, JsonObjectConst d, Link link) {
+  if (link != Link::Usb) { sendErr(out, "wifi settings only over USB"); return false; }
+  IPAddress ip, gw, mask, dns;
+  if (!ip.fromString(d["ip"] | "") || !gw.fromString(d["gw"] | "") || !mask.fromString(d["mask"] | "")) {
+    sendErr(out, "wifi: ip, gw and mask must be IPv4 addresses");
+    return false;
+  }
+  if (!dns.fromString(d["dns"] | "")) dns = gw;
+  NetSettings n;
+  strlcpy(n.ssid, d["ssid"] | "", sizeof n.ssid);
+  strlcpy(n.pass, d["pass"] | "", sizeof n.pass);
+  strlcpy(n.host, d["host"] | "", sizeof n.host);
+  netSetToken(n, d["token"] | "");
+  n.port = constrain(d["port"] | 47821, 1, 65535);
+  n.ip = (uint32_t)ip;
+  n.gw = (uint32_t)gw;
+  n.mask = (uint32_t)mask;
+  n.dns = (uint32_t)dns;
+  if (const char *why = netCheck(n)) {
+    char msg[96];
+    snprintf(msg, sizeof msg, "wifi: %s", why);
+    sendErr(out, msg);
+    return false;
+  }
+  netSave(n);
+  protocolSendNet(out);
+  return true;
 }
 
 static void readLimit(JsonObjectConst o, int16_t &pct, uint32_t *reset) {
@@ -122,20 +195,28 @@ static void applyConfig(JsonObjectConst d) {
       if (!strcmp(led, LED_NAMES[i])) g_settings.led = (LedMode)i;
   }
   if (d["ledlvl"].is<int>()) g_settings.ledLevel = constrain(d["ledlvl"].as<int>(), 0, 255);
+  const char *sync = d["sync"];
+  if (sync) {
+    if (!strcmp(sync, "usb")) g_settings.sync = SyncMode::Usb;
+    else if (!strcmp(sync, "wifi")) g_settings.sync = SyncMode::Wifi;
+    netSetBoardChoseSync(false);   // the companion has spoken; it knows the choice now
+  }
 }
 
-static void handleLine(const char *line, Requests &req) {
+void protocolHandleLine(const char *line, Requests &req, Link link) {
+  // Every reply goes back on the link the message came in on.
+  Print &out = link == Link::Wifi ? netOut() : (Print &)Serial;
   JsonDocument doc;
   DeserializationError e = deserializeJson(doc, line);
   if (e) {
-    sendErr(e.c_str());
+    sendErr(out, e.c_str());
     return;
   }
   const char *type = doc["type"] | "";
 
   if (!strcmp(type, "usage")) {
     applyUsage(doc.as<JsonObjectConst>());
-    Serial.printf("{\"type\":\"ack\",\"seq\":%lu}\n", (unsigned long)(doc["seq"] | 0UL));
+    out.printf("{\"type\":\"ack\",\"seq\":%lu}\n", (unsigned long)(doc["seq"] | 0UL));
     req.usage = true;
     return;
   }
@@ -143,7 +224,7 @@ static void handleLine(const char *line, Requests &req) {
     if (!req.config) req.before = g_settings;
     applyConfig(doc.as<JsonObjectConst>());
     req.config = true;
-    protocolSendSettings();
+    protocolSendSettings(out);
     return;
   }
   if (!strcmp(type, "screen")) {
@@ -202,19 +283,35 @@ static void handleLine(const char *line, Requests &req) {
     const char *v = doc["view"] | "";
     if (!strcmp(v, "alert")) req.preview = 0;
     else if (!strcmp(v, "back")) req.preview = 1;
-    else sendErr("unknown view");
+    else sendErr(out, "unknown view");
     return;
   }
   if (!strcmp(type, "ping")) {
-    Serial.println("{\"type\":\"pong\"}");
+    out.print("{\"type\":\"pong\"}\n");
     return;
   }
   if (!strcmp(type, "hello")) {
-    protocolSendHello();
-    protocolSendSettings();
+    protocolSendHello(out, link == Link::Wifi);
+    protocolSendSettings(out);
     return;
   }
-  sendErr("unknown type");
+  if (!strcmp(type, "wifi")) {
+    // Only stored settings restart Wi-Fi; a refused message leaves a working link alone.
+    if (applyWifi(out, doc.as<JsonObjectConst>(), link)) req.net = true;
+    return;
+  }
+  if (!strcmp(type, "net")) {
+    protocolSendNet(out);
+    return;
+  }
+  if (!strcmp(type, "setup")) {
+    // Like the wifi message: only from someone with the cable.
+    if (link != Link::Usb) { sendErr(out, "setup only over USB"); return; }
+    req.setup = (doc["open"] | true) ? 1 : 0;
+    return;
+  }
+  if (!strcmp(type, "authok")) return;   // the server accepted our token
+  sendErr(out, "unknown type");
 }
 
 void protocolPoll(Requests &req) {
@@ -223,10 +320,10 @@ void protocolPoll(Requests &req) {
     if (c == '\r') continue;
     if (c == '\n') {
       if (overflow) {
-        sendErr("line too long");
+        sendErr(Serial, "line too long");
       } else if (lineLen > 0) {
         lineBuf[lineLen] = 0;
-        handleLine(lineBuf, req);
+        protocolHandleLine(lineBuf, req, Link::Usb);
       }
       lineLen = 0;
       overflow = false;

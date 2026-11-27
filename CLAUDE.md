@@ -49,6 +49,8 @@ flags until the setting is changed on the page (`effective()` in `main.js`).
 ## Hardware facts (from https://www.lcdwiki.com/2.8inch_ESP32-32E-7789)
 
 - LCD on HSPI: SCK 14, MOSI 13, MISO 12, CS 15, DC 2, RST tied to EN, **backlight GPIO 21** (high = on).
+  The panel needs `TFT_INVERSION_ON` and `TFT_RGB_ORDER=TFT_BGR` (checked on the glass 2026-11-27:
+  with inversion off the dark theme showed white, with RGB order the coral gauge showed blue).
 - Touch XPT2046 on its own bus (VSPI in `src/input.cpp`): SCK 25, MOSI 32, MISO 39, CS 33, IRQ 36.
 - RGB LED 22/16/17 (low = on), speaker amp enable 4 (low = on), battery ADC 34, BOOT button GPIO 0.
 - CH340 auto-reset: DTR/RTS drive EN and GPIO0. The companion releases both after opening the port, and
@@ -59,8 +61,8 @@ flags until the setting is changed on the page (`effective()` in `main.js`).
 - `companion.js` is only the entry point; the code is in `src/`: `main.js` (CLI flags, wiring, settings
   page handlers), `usage.js` (log scan, limits, frames), `board.js` (serial, reconnect, hello handshake),
   `config.js` (defaults + validation, `%APPDATA%\claudeBoard\config.json`), `server.js`, `tray.js`
-  (tray icon, window raising, media session and keys), `launcher.js`, `weather.js`, `media.js`, `text.js`
-  (ASCII for the board), `startup.js` (HKCU Run value), `log.js`. The page is `public/index.html` (no framework).
+  (tray icon, window raising, media session and keys), `hub.js` / `netboard.js` / `lan.js` (Wi-Fi sync),
+  `launcher.js`, `weather.js`, `media.js`, `text.js` (ASCII for the board), `startup.js` (HKCU Run value), `log.js`. The page is `public/index.html` (no framework).
 - Keep it CommonJS: pkg bundles CommonJS reliably, ESM not.
 - Any new setting goes in `config.js` `normalize()` (all input passes through it), the page, and for
   board settings also `Settings` in `src/model.h`, `applyConfig`/`protocolSendSettings` and `settings.cpp`.
@@ -72,16 +74,18 @@ flags until the setting is changed on the page (`effective()` in `main.js`).
   `StreamReader` because `Console.In.ReadLineAsync` blocks in .NET Framework, and it exits when
   stdin closes, so it never outlives the companion.
 
-## Status (0.4.0)
+## Status (0.5.0)
 
-- Firmware 0.4.0, companion 0.4.0. Seven screens in `View` (`src/ui.h`): Main, Today, Clock, Weather, Media,
-  Calendar, Launcher, plus the Alert and Back overlays. Each pageable screen has a nav bar (prev, next, page
+- Firmware 0.5.0, companion 0.5.0. Eight screens in `View` (`src/ui.h`): Main, Today, Clock, Weather, Media,
+  Calendar, Launcher, Network, plus the Alert and Back overlays. Each pageable screen has a nav bar (prev, next, page
   dots, play/pause of the auto page change); tap targets come from `uiHitTest` (`ui.cpp`), actions from
   `handleTap` (`main.cpp`). Text that may not fit goes through `fitText` (`ui.cpp`).
 - Rotation 0-3; landscape has its own Main/Today/Weather/Media layouts; touch is calibrated in portrait
   (2026-11-27: raw X mirrored, no swap) and remapped per rotation in `input.cpp`.
-- Clock: six styles (`ClockStyle` in `model.h`, `CLOCK_NAMES` in `protocol.cpp`, `CLOCK_STYLES` in
-  `config.js`), redrawn every second while shown; big digits are TFT_eSPI font 8.
+- Clock: seven styles (digital, analog, rings, flip, words, binary, dots; `ClockStyle` and `CLOCK_STYLES`
+  in `model.h`, `CLOCK_NAMES` in `protocol.cpp`, `protocol.h`, `CLOCK_STYLES` in `config.js`, a button on
+  the page), redrawn every second while shown; big digits are TFT_eSPI font 8. "dots" is "binary" without
+  the digit row, grid centred and dots 2 px bigger.
 - Back RGB LED (`src/led.cpp`, PWM channels 1-3; the backlight is 0): usage colour, alert/back pulses,
   blue pulse when offline; `led`/`ledlvl` board settings.
 - Weather: `companion/src/weather.js` fetches Open-Meteo every 15 min for `config.weather` (lat/lon from the
@@ -104,15 +108,49 @@ flags until the setting is changed on the page (`effective()` in `main.js`).
   renews it (the desktop app's sign-in is not in that file). Claude credentials never go to the board.
 - Every commit is reviewed by `.githooks/post-commit` (headless, read-only `claude -p`, results in `reviews/`,
   git-ignored); enable per clone with `git config core.hooksPath .githooks`.
+- Wi-Fi sync (0.5.0): Sync is USB **or** Wi-Fi (board setting `sync`), never both. Over Wi-Fi the board
+  (`src/net.cpp`: station with a fixed IP + `links2004/WebSockets` client) answers the server's `challenge`
+  with `auth` = HMAC-SHA256(pairing token, nonce) (the token never crosses the network), then sends the
+  same protocol messages as USB, one per WebSocket message. `protocolHandleLine(line, req,
+  link)` answers on the link a message came from; events go to the Sync link (`protocolEventOut`). Network
+  settings live in NVS namespace `net`, outside `Settings`, so the password and token are never echoed;
+  they arrive only in a `wifi` message over USB. The companion's `hub.js` holds the USB `Board` and any
+  `NetBoard`s (`netboard.js`, both `BoardLink`s from `board.js`): data to the Sync side, `cfg` to every
+  link. `lan.js` listens on `0.0.0.0:<lan.port>` (default 47821) only while Sync is Wi-Fi; the settings
+  page stays on 127.0.0.1. Test the LAN side without hardware: `node tools/fake_wifi_board.js host port token`.
+  Measured on the board: largest free block 70 KB before Wi-Fi, 45 KB with it (the screen buffer is
+  allocated before Wi-Fi starts). USB mode keeps the radio fully off (`WiFi.mode(WIFI_OFF)`).
+- Setup on the board (`src/portal.cpp`): BOOT held 5 s, the page's "Open Wi-Fi setup on the board", the USB
+  `setup` message, or Wi-Fi Sync with nothing stored opens a WPA2 network `claudeBoard-XXXX` (fresh 8-digit
+  password on the screen) with a captive form at 192.168.4.1; saving stores, sets Sync to Wi-Fi, restarts.
+  Nothing is erased by opening it. `netCheck()` validates for both the USB `wifi` message and the form.
+- Screens: an 8th page, Network (Sync, Wi-Fi, signal, board IP, server, free memory); in Wi-Fi Sync the
+  header shows a Wi-Fi mark (green server up, amber network only, red no network).
 - Debug switches `-DBOOT_SELFTEST=1` and `-DTOUCH_DEBUG=1` are commented out in `platformio.ini`.
 - Tested over serial on the board: every screen, style and state in portrait and landscape, cfg echo, NVS
-  across a reset, reconnect. Not yet checked by eye on the glass: the layouts, landscape taps, the media
-  keys acting on the PC, the LED colours, apps coming to the front, the tray icon.
+  across a reset, reconnect. Checked by eye on the glass 2026-11-27 (after the colour fix): every page's
+  layout and taps in landscape and portrait, all seven clock styles, media keys acting on the PC, launcher
+  apps coming to the front, the alert overlay, the LED colours, the tray icon.
 
 ## Next steps
 
-1. Check the items above on the glass; tune layouts in `ui.cpp` (geometry is in small `*Geo` functions or
-   at the top of each `draw*`), and the wipe strip size/delay in `uiRender` if it looks slow or tears.
+Where things stand (2026-11-27): `wifi-sync` is merged into `main`. The board is flashed with 0.5.0 and
+every USB-mode item has been checked on the glass. Wi-Fi sync tested on the home network 2026-11-27:
+settings sent from the page over USB, board at a fixed IP, pairing accepted, usage frames acked and taps
+sent as events over Wi-Fi, board on a phone charger with no USB, rejoins by itself after a power cut.
+Windows Firewall let the companion take inbound 47821 without a rule added by hand. It is the page's Send
+button that sends the Wi-Fi settings; the "Sync over" toggle alone leaves the board with whatever it had
+stored (it kept trying the work PC's test network until Send was pressed).
+
+New PC: clone, `git config core.hooksPath .githooks`, `cd companion && npm install`. The board's COM port
+differs per PC and USB port (the CH340 is auto-detected; Device Manager for `--upload-port`). The
+companion's config (`%APPDATA%\claudeBoard`) is per PC and not in git; a fresh one starts from the
+`config.js` defaults and its `cfg` overwrites the board's saved settings on connect. Set them back on the
+page: rot 3 (landscape flipped), clock "dots", cycle 20 s, fx wipe, dim 120 s, brightness 5, LED off
+(ledlvl 247), alerts 80/90, 24 h; plus the weather place and launcher apps (PC-specific paths). See
+Build notes below if `pio` fails.
+
+1. On-board Wi-Fi setup from a phone (BOOT held 5 s, captive form at 192.168.4.1): not tested yet.
 2. Exe icon/version resources (not set yet; editing resources after pkg can break its payload).
 3. Ideas not started: degrees F / mph for weather, alert beeps on the unused speaker (amp enable GPIO 4).
 

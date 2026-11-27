@@ -1,6 +1,8 @@
 // claudeBoard companion: tray app + settings page + serial feed to the meter.
 
 const fs = require('node:fs');
+const os = require('node:os');
+const crypto = require('node:crypto');
 const { spawn } = require('node:child_process');
 const config = require('./config');
 const { log, recent, FILE: LOG_FILE } = require('./log');
@@ -12,6 +14,8 @@ const startup = require('./startup');
 const { launch, frontNames } = require('./launcher');
 const { refreshWeather, weatherFrame, weatherState, geocode } = require('./weather');
 const { MEDIA_VK, mediaFrame } = require('./media');
+const { Hub } = require('./hub');
+const { createLan } = require('./lan');
 const VERSION = require('../package.json').version;
 
 // ---------- command line ----------
@@ -60,6 +64,11 @@ if (opt('--brightness')) ovBoard.brightness = Number(opt('--brightness'));
 
 const firstRun = !fs.existsSync(config.FILE);
 let saved = config.load();
+// The pairing token Wi-Fi boards must send (lan.js), made once and kept.
+if (!saved.lan.token) {
+  saved = config.normalize({ ...saved, lan: { ...saved.lan, token: crypto.randomBytes(16).toString('hex') } });
+  config.save(saved);
+}
 
 function effective() {
   return config.normalize({ ...saved, ...overrides, board: { ...saved.board, ...ovBoard } });
@@ -73,6 +82,28 @@ function openBrowser(url) {
 }
 
 const sameJSON = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+// This PC's addresses, to suggest as the server a Wi-Fi board connects to: home/office LAN
+// ranges first (192.168, 10, 172.16-31), anything else (a VPN such as Tailscale's 100.64/10,
+// which a board on the Wi-Fi can't reach) after them, link-local 169.254 not at all.
+function lanAddresses() {
+  const rank = (ip) => {
+    const [a, b] = ip.split('.').map(Number);
+    if (a === 192 && b === 168) return 0;
+    if (a === 10) return 1;
+    if (a === 172 && b >= 16 && b <= 31) return 2;
+    return 9;
+  };
+  const out = [];
+  for (const [name, list] of Object.entries(os.networkInterfaces())) {
+    for (const a of list || []) {
+      if (a.family === 'IPv4' && !a.internal && !a.address.startsWith('169.254.')) out.push({ name, address: a.address });
+    }
+  }
+  return out.sort((x, y) => rank(x.address) - rank(y.address));
+}
+
+const ipNum = (s) => s.split('.').reduce((n, x) => n * 256 + Number(x), 0);
 
 // ---------- dry run: frames to stdout, nothing else ----------
 
@@ -90,14 +121,19 @@ async function dryRun() {
 
 async function run() {
   const url = `http://127.0.0.1:${UI_PORT}/`;
-  const board = new Board(effective, { verbose: VERBOSE });
+  // The hub stands where the one USB board used to: data to the Sync link (USB, or the
+  // Wi-Fi boards lan.js accepts), settings to every link.
+  const usbBoard = new Board(effective, { verbose: VERBOSE });
+  const board = new Hub(usbBoard, effective, { verbose: VERBOSE });
+  const lan = createLan({ getCfg: effective, onBoard: (ws, ip) => board.addWifi(ws, ip) });
   const tray = NO_TRAY ? null : new Tray();
   // Watch for the app's window before starting it, so Windows' focus rules don't leave it behind.
   const open = (a) => { if (tray) tray.front(frontNames(a)); launch(a); };
   let pushTimer = null, lastFrame = null, lastFrameAt = 0;
   let startupOn = false;
 
-  const sendBoardCfg = () => board.send({ type: 'cfg', ...effective().board });
+  // Settings go to every link, so a board hears a Sync change whichever link it is on.
+  const sendBoardCfg = () => board.sendAll({ type: 'cfg', ...effective().board });
   // The board only gets the tile names; paths stay here. Its fonts are ASCII only.
   const sendApps = () => board.send({
     type: 'apps',
@@ -140,14 +176,25 @@ async function run() {
     if (!ONCE) pushTimer = setInterval(push, effective().interval * 1000);
   };
 
-  board.on('ready', () => {
+  const onReady = () => {
     sendBoardCfg();
     sendApps();
     weatherSent = -1;   // a (re)booted board has no weather
     sendMedia();
     push();
     schedule();
+  };
+  board.on('ready', onReady);
+  // A board set up from a phone (its own setup page) switched itself to Wi-Fi: adopt that,
+  // rather than send our USB setting back. The settings are saved synchronously inside
+  // updateConfig, before this hello's 'ready' sends them.
+  board.on('syncFromBoard', (v, link) => {
+    if (link !== usbBoard || v === effective().board.sync) return;
+    log(`the board was set to ${v === 'wifi' ? 'Wi-Fi' : 'USB'} on its own setup page; following it`);
+    app.updateConfig({ board: { sync: v } }).catch((e) => log('sync from board:', e.message));
   });
+  // The USB board while Sync is Wi-Fi: it only needs its settings (so it knows the Sync mode).
+  board.on('setupReady', () => usbBoard.send({ type: 'cfg', ...effective().board }));
   board.on('event', (m) => {
     if (m.name === 'media') {
       // The keys go through the tray helper; without it (--no-tray) there's nothing to press them.
@@ -189,6 +236,44 @@ async function run() {
   board.on('status', updateTray);
   setInterval(updateTray, 2000);
 
+  // ---------- Wi-Fi setup, sent to the board over USB ----------
+
+  // Sends the network, the board's fixed address, this PC as the server and the token down
+  // the cable, waits for the board's answer, then switches Sync to Wi-Fi. The password is
+  // passed through, never saved here.
+  async function wifiSetup(body) {
+    const cfg = effective();
+    if (!usbBoard.state.connected) throw new Error('plug the board in over USB first');
+    if (!usbBoard.state.netCapable) throw new Error('the board firmware has no Wi-Fi sync yet; flash 0.5.0 or later');
+    const str = (v) => String(v == null ? '' : v).trim();
+    const w = { ssid: str(body.ssid).slice(0, 32), ip: str(body.ip), gw: str(body.gw), mask: str(body.mask) || '255.255.255.0',
+      dns: str(body.dns) || str(body.gw), host: str(body.host) };
+    const pass = String(body.pass == null ? '' : body.pass);
+    if (!w.ssid) throw new Error('enter the Wi-Fi network name');
+    for (const k of ['ip', 'gw', 'mask', 'dns', 'host']) {
+      if (!config.IPV4.test(w[k])) throw new Error(`${k === 'host' ? 'server' : k} must be an IPv4 address like 192.168.1.20`);
+    }
+    if (pass.length > 64) throw new Error('the Wi-Fi password is too long');
+    const m = ipNum(w.mask);
+    if ((ipNum(w.ip) & m) !== (ipNum(w.gw) & m)) throw new Error("the board's IP is not in the gateway's subnet");
+    if (w.ip === w.host) throw new Error("the board's IP is the server's IP");
+
+    saved = config.normalize({ ...saved, wifi: w });
+    config.save(saved);
+    const answer = await new Promise((resolve) => {
+      const done = (net, err) => { clearTimeout(t); board.off('net', onNet); board.off('boardError', onErr); resolve({ net, err }); };
+      const onNet = (n, link) => { if (link === usbBoard) done(n, null); };
+      const onErr = (msg, link) => { if (link === usbBoard) done(null, msg); };
+      const t = setTimeout(() => done(null, 'the board did not answer'), 4000);
+      board.on('net', onNet);
+      board.on('boardError', onErr);
+      usbBoard.send({ type: 'wifi', ...w, pass, port: cfg.lan.port, token: cfg.lan.token });
+    });
+    if (answer.err) throw new Error(answer.err);
+    log(`Wi-Fi settings sent to the board: ${w.ssid}, board ${w.ip}, server ${w.host}:${cfg.lan.port}`);
+    await app.updateConfig({ board: { sync: 'wifi' } });
+  }
+
   // ---------- what the settings page calls ----------
 
   const app = {
@@ -199,6 +284,8 @@ async function run() {
         config: cfg,
         overridden: [...Object.keys(overrides), ...Object.keys(ovBoard).map((k) => 'board.' + k)],
         board: board.state,
+        boards: board.list(),
+        lan: { ...lan.state, token: cfg.lan.token, addresses: lanAddresses() },
         limits: { enabled: cfg.limits, ok: !!limitsState.data && !limitsState.error, error: limitsState.error, at: limitsState.at },
         weather: { set: cfg.weather.lat !== null, data: weatherState.data, error: weatherState.error, at: weatherState.at },
         media,
@@ -218,12 +305,25 @@ async function run() {
       // Anything set on the page stops being overridden by the command line.
       for (const k of Object.keys(body)) if (k !== 'board') delete overrides[k];
       for (const k of Object.keys(body.board || {})) delete ovBoard[k];
-      saved = config.normalize({ ...saved, ...body, board: { ...saved.board, ...(body.board || {}) } });
+      // board and lan merge field by field; the token is only ever changed by the lan-token action.
+      const lanPatch = { ...(body.lan || {}) };
+      delete lanPatch.token;
+      saved = config.normalize({
+        ...saved, ...body,
+        board: { ...saved.board, ...(body.board || {}) },
+        lan: { ...saved.lan, ...lanPatch },
+      });
       config.save(saved);
       const after = effective();
 
       if (after.port !== before.port) { log(`port set to ${after.port}`); board.reconnect(); }
       if (!sameJSON(after.board, before.board)) sendBoardCfg();
+      if (after.board.sync !== before.board.sync || after.lan.port !== before.lan.port) {
+        log(`sync: ${after.board.sync === 'wifi' ? 'Wi-Fi' : 'USB'}`);
+        if (after.board.sync === 'usb') board.closeWifi('sync is USB now');   // a clean close before the listener stops
+        lan.apply();
+        if (after.board.sync === 'usb' && usbBoard.state.ready) onReady();   // USB is the data link again
+      }
       if (!sameJSON(after.apps, before.apps)) sendApps();
       if (!sameJSON(after.weather, before.weather)) {
         await refreshWeather(after, true);
@@ -257,6 +357,31 @@ async function run() {
         case 'alert': board.send({ type: 'preview', view: 'alert' }); break;
         case 'back': board.send({ type: 'preview', view: 'back' }); break;
         case 'reconnect': board.reconnect(); break;
+        case 'wifi-setup': await wifiSetup(body); break;
+        case 'board-setup': {
+          // Opens Wi-Fi setup on the plugged-in board (its own network and page), as BOOT held 5 s does.
+          if (!usbBoard.state.connected) throw new Error('plug the board in over USB first');
+          const open = body.open !== false;
+          usbBoard.status({ net: null });   // only a report from after this request counts
+          usbBoard.send({ type: 'setup', open });
+          await new Promise((r) => setTimeout(r, 400));
+          usbBoard.send({ type: 'net' });
+          await new Promise((r) => setTimeout(r, 400));
+          // The net reply says whether it worked; older firmware answers "unknown type".
+          const n = usbBoard.state.net;
+          if (open && !(n && n.setup)) throw new Error('the board did not open setup (firmware 0.5.0 or later needed)');
+          if (open) log(`setup network open on the board: ${n.setupSsid}`);
+          break;
+        }
+        case 'lan-token': {
+          // A new token un-pairs every Wi-Fi board; each needs its Wi-Fi setup sent again.
+          saved = config.normalize({ ...saved, lan: { ...saved.lan, token: crypto.randomBytes(16).toString('hex') } });
+          config.save(saved);
+          board.closeWifi('new pairing token');
+          log('new pairing token made; Wi-Fi boards must be set up again over USB');
+          break;
+        }
+        case 'net': usbBoard.send({ type: 'net' }); await new Promise((r) => setTimeout(r, 400)); break;
         case 'weather': await refreshWeather(effective(), true); sendWeather(effective()); break;
         case 'push': await refreshLimits(effective(), true); await push(); break;
         default: throw new Error('unknown action');
@@ -288,6 +413,7 @@ async function run() {
     log('quitting');
     if (tray) tray.stop();
     board.stop();
+    lan.stop();
     server.close();
     setTimeout(() => process.exit(0), 300);
   };
@@ -310,6 +436,7 @@ async function run() {
   process.on('SIGINT', quit);
   process.on('SIGTERM', quit);
   board.start();
+  lan.apply();   // listens for Wi-Fi boards only while Sync is Wi-Fi
 }
 
 // ---------- entry ----------
