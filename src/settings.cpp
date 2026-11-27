@@ -14,7 +14,7 @@ void settingsLoad() {
     s.alert1 = prefs.getUChar("alert1", s.alert1);
     s.alert2 = prefs.getUChar("alert2", s.alert2);
     s.h24 = prefs.getBool("h24", s.h24);
-    s.rot = prefs.getUChar("rot", s.rot) == 2 ? 2 : 0;
+    s.rot = prefs.getUChar("rot", s.rot) & 3;
     s.cycle = prefs.getUShort("cycle", s.cycle);
     uint8_t fx = prefs.getUChar("fx", 0);
     s.fx = fx <= 2 ? (Fx)fx : Fx::None;

@@ -63,13 +63,15 @@ static bool touchRead(int &x, int &y) {
 #ifdef TOUCH_INVERT_Y
   y = 319 - y;
 #endif
-  // The calibration above is for rotation 0; a flipped screen turns touch around too.
-  if (g_settings.rot == 2) {
-    x = 239 - x;
-    y = 319 - y;
+  // The calibration above gives portrait (rotation 0) coordinates; turn them into the
+  // current rotation's, using the same mapping TFT_eSPI uses for drawing.
+  int px = constrain(x, 0, 239), py = constrain(y, 0, 319);
+  switch (g_settings.rot) {
+    case 1: x = py;        y = 239 - px; break;  // landscape, 320x240
+    case 2: x = 239 - px;  y = 319 - py; break;  // portrait flipped
+    case 3: x = 319 - py;  y = px;       break;  // landscape flipped
+    default: x = px;       y = py;       break;
   }
-  x = constrain(x, 0, 239);
-  y = constrain(y, 0, 319);
 #ifdef TOUCH_DEBUG
   static uint32_t lastLog = 0;
   if (millis() - lastLog > 250) {

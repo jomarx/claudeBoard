@@ -89,7 +89,10 @@ static void applyConfig(JsonObjectConst d) {
   if (d["alert1"].is<int>()) g_settings.alert1 = constrain(d["alert1"].as<int>(), 1, 100);
   if (d["alert2"].is<int>()) g_settings.alert2 = constrain(d["alert2"].as<int>(), 1, 100);
   if (d["h24"].is<bool>()) g_settings.h24 = d["h24"];
-  if (d["rot"].is<int>()) g_settings.rot = d["rot"].as<int>() == 2 ? 2 : 0;
+  if (d["rot"].is<int>()) {
+    int r = d["rot"].as<int>();
+    g_settings.rot = (r >= 0 && r <= 3) ? r : 0;
+  }
   if (d["cycle"].is<int>()) g_settings.cycle = constrain(d["cycle"].as<int>(), 0, 3600);
   if (d["dim"].is<int>()) g_settings.dim = constrain(d["dim"].as<int>(), 0, 3600);
   const char *fx = d["fx"];

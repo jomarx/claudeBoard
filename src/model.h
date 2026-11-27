@@ -40,7 +40,7 @@ struct Settings {
   uint8_t alert1 = 80;
   uint8_t alert2 = 90;
   bool h24 = true;
-  uint8_t rot = 0;          // display rotation, 0 = portrait, 2 = portrait flipped
+  uint8_t rot = 0;          // display rotation, 0 portrait, 1 landscape, 2/3 flipped
   uint16_t cycle = 0;       // seconds between automatic page changes, 0 = off
   Fx fx = Fx::None;         // effect when the page changes
   uint16_t dim = 120;       // seconds idle before dimming, 0 = never

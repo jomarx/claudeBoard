@@ -17,7 +17,8 @@
 //             "models":[{"n":"Opus 5.5","p":68},{"n":"Sonnet 5.5","p":29}]}}
 //   {"type":"cfg","brightness":200,"alert1":80,"alert2":90,"h24":true,
 //    "rot":0,"cycle":0,"fx":"none","dim":120}          -> device answers with its cfg
-//       rot: 0 portrait, 2 portrait flipped; cycle: seconds between automatic page
+//       rot: 0 portrait, 1 landscape, 2 portrait flipped, 3 landscape flipped
+//       (hello's w/h stay the panel's native 240x320); cycle: seconds between automatic page
 //       changes (0 off); fx: "none" | "wipe" | "fade"; dim: idle seconds (0 never).
 //       Every field is optional; {"type":"cfg"} alone just asks for the current values.
 //       Settings are saved on the board and survive a reboot.

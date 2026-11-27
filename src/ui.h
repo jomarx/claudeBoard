@@ -17,7 +17,8 @@ struct AlertInfo {
 
 void uiBegin();
 void uiSetBrightness(uint8_t level);
-// 0 = portrait, 2 = portrait flipped. The next uiRender repaints the whole screen.
+// 0 = portrait 240x320, 1 = landscape 320x240, 2 = portrait flipped, 3 = landscape
+// flipped. The next uiRender repaints the whole screen.
 void uiSetRotation(uint8_t rot);
 // fx animates the change to this view; Fx::None just redraws.
 void uiRender(View v, const AlertInfo &alert, Fx fx = Fx::None);

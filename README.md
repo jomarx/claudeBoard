@@ -40,7 +40,7 @@ puts an icon in the tray (green = live, amber = waiting or a limits error, grey 
 opens the settings page the first time. Starting it again while it runs just opens the page.
 The tray menu has Open settings, Reconnect, Start with Windows and Quit.
 
-Settings page: serial port, update interval, orientation (portrait / flipped), brightness,
+Settings page: serial port, update interval, orientation (portrait or landscape, each normal or flipped), brightness,
 dim timeout, 12/24h clock, automatic screen change every N seconds, transition (none / wipe /
 fade), alert thresholds, real limits on/off, session budget, plan label, start with Windows.
 Changes apply to the board right away and are saved in `%APPDATA%\claudeBoard\config.json`;
@@ -118,7 +118,7 @@ when the PC is off. A long press still cycles brightness, and the companion save
 - Colours inverted: change `-DTFT_INVERSION_OFF` to `-DTFT_INVERSION_ON` in `platformio.ini`.
 - Red and blue swapped: change `TFT_RGB_ORDER` to `TFT_BGR`.
 - Garbled or blank picture: the panel may actually be an ILI9341; swap `-DST7789_DRIVER` for `-DILI9341_2_DRIVER`.
-- Upside down: pick "Portrait flipped" on the companion's settings page (touch follows).
+- Upside down or sideways: pick the orientation on the companion's settings page (touch follows).
 - Taps land in the wrong place: add `-DTOUCH_SWAP_XY`, `-DTOUCH_INVERT_X` or `-DTOUCH_INVERT_Y`,
   or tune `TOUCH_X_MIN/MAX`, `TOUCH_Y_MIN/MAX`. The values in `platformio.ini` are calibrated for
-  portrait (rotation 0); the flipped orientation mirrors them in code, so calibrate in portrait.
+  portrait (rotation 0); the other orientations are derived from them in code, so calibrate in portrait.

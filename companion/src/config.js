@@ -21,7 +21,7 @@ const DEFAULTS = {
     alert1: 80,           // first alert, % of the 5-hour limit
     alert2: 90,
     h24: true,
-    rot: 0,               // 0 portrait, 2 portrait flipped
+    rot: 0,               // 0 portrait, 1 landscape, 2 portrait flipped, 3 landscape flipped
     cycle: 0,             // seconds between automatic screen changes, 0 = off
     fx: 'none',           // 'none' | 'wipe' | 'fade'
     dim: 120,             // idle seconds before dimming, 0 = never
@@ -52,7 +52,7 @@ function normalize(input, base = DEFAULTS) {
       alert1: clampInt(b.alert1, 1, 100, bb.alert1),
       alert2: clampInt(b.alert2, 1, 100, bb.alert2),
       h24: typeof b.h24 === 'boolean' ? b.h24 : bb.h24,
-      rot: b.rot === undefined ? bb.rot : Number(b.rot) === 2 ? 2 : 0,
+      rot: b.rot === undefined ? bb.rot : [0, 1, 2, 3].includes(Number(b.rot)) ? Number(b.rot) : 0,
       cycle: clampInt(b.cycle, 0, 3600, bb.cycle),
       fx: ['none', 'wipe', 'fade'].includes(b.fx) ? b.fx : bb.fx,
       dim: clampInt(b.dim, 0, 3600, bb.dim),
