@@ -74,14 +74,16 @@ flags until the setting is changed on the page (`effective()` in `main.js`).
 
 ## Status (0.5.0)
 
-- Firmware 0.5.0, companion 0.5.0. Seven screens in `View` (`src/ui.h`): Main, Today, Clock, Weather, Media,
-  Calendar, Launcher, plus the Alert and Back overlays. Each pageable screen has a nav bar (prev, next, page
+- Firmware 0.5.0, companion 0.5.0. Eight screens in `View` (`src/ui.h`): Main, Today, Clock, Weather, Media,
+  Calendar, Launcher, Network, plus the Alert and Back overlays. Each pageable screen has a nav bar (prev, next, page
   dots, play/pause of the auto page change); tap targets come from `uiHitTest` (`ui.cpp`), actions from
   `handleTap` (`main.cpp`). Text that may not fit goes through `fitText` (`ui.cpp`).
 - Rotation 0-3; landscape has its own Main/Today/Weather/Media layouts; touch is calibrated in portrait
   (2026-11-27: raw X mirrored, no swap) and remapped per rotation in `input.cpp`.
-- Clock: six styles (`ClockStyle` in `model.h`, `CLOCK_NAMES` in `protocol.cpp`, `CLOCK_STYLES` in
-  `config.js`), redrawn every second while shown; big digits are TFT_eSPI font 8.
+- Clock: seven styles (digital, analog, rings, flip, words, binary, dots; `ClockStyle` and `CLOCK_STYLES`
+  in `model.h`, `CLOCK_NAMES` in `protocol.cpp`, `protocol.h`, `CLOCK_STYLES` in `config.js`, a button on
+  the page), redrawn every second while shown; big digits are TFT_eSPI font 8. "dots" is "binary" without
+  the digit row, grid centred and dots 2 px bigger.
 - Back RGB LED (`src/led.cpp`, PWM channels 1-3; the backlight is 0): usage colour, alert/back pulses,
   blue pulse when offline; `led`/`ledlvl` board settings.
 - Weather: `companion/src/weather.js` fetches Open-Meteo every 15 min for `config.weather` (lat/lon from the
