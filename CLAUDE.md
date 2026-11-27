@@ -49,6 +49,8 @@ flags until the setting is changed on the page (`effective()` in `main.js`).
 ## Hardware facts (from https://www.lcdwiki.com/2.8inch_ESP32-32E-7789)
 
 - LCD on HSPI: SCK 14, MOSI 13, MISO 12, CS 15, DC 2, RST tied to EN, **backlight GPIO 21** (high = on).
+  The panel needs `TFT_INVERSION_ON` and `TFT_RGB_ORDER=TFT_BGR` (checked on the glass 2026-11-27:
+  with inversion off the dark theme showed white, with RGB order the coral gauge showed blue).
 - Touch XPT2046 on its own bus (VSPI in `src/input.cpp`): SCK 25, MOSI 32, MISO 39, CS 33, IRQ 36.
 - RGB LED 22/16/17 (low = on), speaker amp enable 4 (low = on), battery ADC 34, BOOT button GPIO 0.
 - CH340 auto-reset: DTR/RTS drive EN and GPIO0. The companion releases both after opening the port, and
